@@ -645,23 +645,37 @@
         }
 
         async function submitToServer() {
-          try {
-            if (!raterId) { alert('Please enter your Rater ID.'); return; }
-            if (!ENDPOINT || ENDPOINT.includes('PASTE_')) { alert('Please set the Google Apps Script ENDPOINT at the top of the file.'); return; }
-            const payload = { raterId, studyId: study.studyId, payload: { study, annos, exportedAt: new Date().toISOString() } };
-            const res = await fetch(ENDPOINT, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || data.ok !== true) throw new Error('Server rejected the submission');
-            alert('Submitted! Thank you.');
-          } catch (err) {
-            console.error(err);
-            alert('Submission failed. Check console for details.');
-          }
+            try {
+                if (!raterId) { alert('Please enter your Rater ID.'); return; }
+                if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
+                alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
+                return;
+                }
+
+                const fd = new FormData();
+                fd.append('raterId', raterId);
+                fd.append('studyId', study.studyId);
+                fd.append('payload', JSON.stringify({
+                study,
+                annos,
+                exportedAt: new Date().toISOString()
+                }));
+
+                // Using FormData avoids a preflight; `no-cors` lets the request go through
+                // from a static site even though we can't read the response.
+                await fetch(ENDPOINT, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: fd
+                });
+
+                alert('Submitted! Check the Google Sheet for the new row.');
+            } catch (err) {
+                console.error('Submission failed:', err);
+                alert('Submission failed. See console.');
+            }
         }
+
 
         const progressText = `${sceneIdx + 1} / ${study.scenes.length} scenes`;
 
