@@ -225,10 +225,10 @@
             onMouseDown={start}
             onMouseMove={move}
             onMouseUp={end}
-            className="relative w-full h-full select-none bg-neutral-100 rounded-xl overflow-hidden"
+            className="relative w-full select-none bg-neutral-100 rounded-xl overflow-hidden"
             title="Click-drag to draw a rectangle"
           >
-            <img src={src} alt="view" className="w-full h-full object-contain" draggable={false} />
+            <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
             {/* Existing rectangles */}
             {pairs.map((p) =>
@@ -277,7 +277,7 @@
         return (
           <div className="grid grid-cols-2 gap-3 w-full">
             {setDef.images.map((src, idx) => (
-              <div key={idx} className="aspect-[4/3]">
+              <div key={idx}>
                 <ImageBox
                   src={src}
                   imageIndex={idx}
