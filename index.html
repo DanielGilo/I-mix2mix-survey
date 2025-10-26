@@ -146,17 +146,20 @@
         imageIndex,
         pairs,
         activePairId,
-        onFinishRect, // (pairId, rect)
-        onStartDrawing, // () => void
+        onFinishRect,     // (pairId, rect)
+        onStartDrawing,   // () => void
       }) {
-        const ref = useRef(null);
-        const [drag, setDrag] = useState(null); // {startX, startY, curX, curY}
-        const [imgDims, setImgDims] = useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
+        const ref = React.useRef(null);
+        const [drag, setDrag] = React.useState(null); // {startX, startY, curX, curY}
+        const [imgDims, setImgDims] = React.useState({
+          naturalW: 0, naturalH: 0, clientW: 0, clientH: 0
+        });
 
-        useEffect(() => {
+        React.useEffect(() => {
           const el = ref.current;
           if (!el) return;
           const img = el.querySelector("img");
+
           function update() {
             if (!img) return;
             setImgDims({
@@ -171,6 +174,8 @@
           ro.observe(el);
           return () => ro.disconnect();
         }, [src]);
+
+        const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
         const start = (e) => {
           if (!activePairId) return; // only draw when a pair is active
@@ -225,10 +230,20 @@
             onMouseDown={start}
             onMouseMove={move}
             onMouseUp={end}
-            className="relative w-full select-none bg-neutral-100 rounded-xl overflow-hidden"
+            className="relative w-full select-none bg-white rounded-xl"
             title="Click-drag to draw a rectangle"
           >
-            <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
+            <img
+              src={src}
+              alt="view"
+              className="w-full h-auto object-contain block"
+              draggable={false}
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                // should log 512x512 for your assets
+                console.debug('Loaded image:', img.naturalWidth, 'x', img.naturalHeight, src);
+              }}
+            />
 
             {/* Existing rectangles */}
             {pairs.map((p) =>
@@ -272,10 +287,11 @@
         );
       }
 
+
       // ======= SetViewer (2x2 grid) =======
       function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing }) {
         return (
-          <div className="grid grid-cols-2 gap-3 w-full">
+          <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
             {setDef.images.map((src, idx) => (
               <div key={idx}>
                 <ImageBox
@@ -291,6 +307,7 @@
           </div>
         );
       }
+
 
       // ======= Sidebar Controls =======
       function Sidebar({
