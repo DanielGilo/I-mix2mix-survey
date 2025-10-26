@@ -275,7 +275,7 @@
       // ======= SetViewer (2x2 grid) =======
       function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing }) {
         return (
-          <div className="grid grid-cols-2 gap-3 w-full h-[72vh]">
+          <div className="grid grid-cols-2 gap-3 w-full">
             {setDef.images.map((src, idx) => (
               <div key={idx} className="aspect-[4/3]">
                 <ImageBox
@@ -562,14 +562,7 @@
         const currentScene = study.scenes[sceneIdx];
         const [defA, defB] = currentScene.sets;
 
-        const setDefsByName = useMemo(() => {
-          return {
-            0: study.setNames[0] === "Baseline" ? defA : defB,
-            1: study.setNames[1] === "Your Method" ? defB : defA,
-          };
-        }, [study, currentScene]);
-
-        const setDef = setDefsByName[setTab];
+        const setDef = setTab === 0 ? defA : defB;
         const sceneAnno = annos[currentScene.sceneId];
         const setAnno = sceneAnno.sets[setDef.setId];
 
