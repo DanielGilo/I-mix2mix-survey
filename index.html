@@ -22,817 +22,693 @@
 
     <!-- The entire app -->
     <script type="text/babel" data-presets="react,env">
-      /* Hooks from global React (no imports needed) */
-      const { useEffect, useMemo, useRef, useState } = React;
+    const { useEffect, useMemo, useRef, useState } = React;
 
-      /**
-       * Multi-View 3D Consistency Rater — single file React app
-       *
-       * What it does
-       * - Shows two 4-image sets (e.g., Baseline vs. Your Method) for each scene.
-       * - Raters draw PAIRED rectangles to mark 3D inconsistencies between any two views in a set.
-       * - Each pair = two rectangles (A & B) + optional label. Pairs are color-coded.
-       * - Supports “No inconsistencies” flag per set.
-       * - Keyboard shortcuts, undo, delete, and JSON export/import.
-       * - Progress gating: Move to next scene after both sets marked.
-       */
+    // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
+    const SAMPLE_STUDY = {
+      studyId: "demo_study_v1",
+      instructions:
+        "Mark pairs of rectangles highlighting where multi-view images disagree in 3D (shape, pose, identity, lighting-consistency artifacts, etc.). Each pair should link two corresponding regions across two views.",
+      setNames: ["Baseline", "Your Method"],
+      scenes: [
+        {
+          sceneId: "scene_001",
+          title: "Mannequin Head",
+          sets: [
+            { setId: "baseline_s1", images: [
+              "https://picsum.photos/seed/scene1a/640/400",
+              "https://picsum.photos/seed/scene1b/640/400",
+              "https://picsum.photos/seed/scene1c/640/400",
+              "https://picsum.photos/seed/scene1d/640/400",
+            ]},
+            { setId: "method_s1", images: [
+              "https://picsum.photos/seed/scene1e/640/400",
+              "https://picsum.photos/seed/scene1f/640/400",
+              "https://picsum.photos/seed/scene1g/640/400",
+              "https://picsum.photos/seed/scene1h/640/400",
+            ]},
+          ],
+        },
+        {
+          sceneId: "scene_002",
+          title: "Bust Sculpture",
+          sets: [
+            { setId: "baseline_s2", images: [
+              "https://picsum.photos/seed/scene2a/640/400",
+              "https://picsum.photos/seed/scene2b/640/400",
+              "https://picsum.photos/seed/scene2c/640/400",
+              "https://picsum.photos/seed/scene2d/640/400",
+            ]},
+            { setId: "method_s2", images: [
+              "https://picsum.photos/seed/scene2e/640/400",
+              "https://picsum.photos/seed/scene2f/640/400",
+              "https://picsum.photos/seed/scene2g/640/400",
+              "https://picsum.photos/seed/scene2h/640/400",
+            ]},
+          ],
+        },
+      ],
+    };
 
-      // ======= SAMPLE DATA (Replace with your own or use Import) =======
-      const SAMPLE_STUDY = {
-        studyId: "demo_study_v1",
-        instructions:
-          "Mark pairs of rectangles highlighting where multi-view images disagree in 3D (shape, pose, identity, lighting-consistency artifacts, etc.). Each pair should link two corresponding regions across two views.",
-        setNames: ["Baseline", "Your Method"],
-        scenes: [
-          {
-            sceneId: "scene_001",
-            title: "Mannequin Head",
-            sets: [
-              {
-                setId: "baseline_s1",
-                images: [
-                  "https://picsum.photos/seed/scene1a/640/400",
-                  "https://picsum.photos/seed/scene1b/640/400",
-                  "https://picsum.photos/seed/scene1c/640/400",
-                  "https://picsum.photos/seed/scene1d/640/400",
-                ],
-              },
-              {
-                setId: "method_s1",
-                images: [
-                  "https://picsum.photos/seed/scene1e/640/400",
-                  "https://picsum.photos/seed/scene1f/640/400",
-                  "https://picsum.photos/seed/scene1g/640/400",
-                  "https://picsum.photos/seed/scene1h/640/400",
-                ],
-              },
-            ],
-          },
-          {
-            sceneId: "scene_002",
-            title: "Bust Sculpture",
-            sets: [
-              {
-                setId: "baseline_s2",
-                images: [
-                  "https://picsum.photos/seed/scene2a/640/400",
-                  "https://picsum.photos/seed/scene2b/640/400",
-                  "https://picsum.photos/seed/scene2c/640/400",
-                  "https://picsum.photos/seed/scene2d/640/400",
-                ],
-              },
-              {
-                setId: "method_s2",
-                images: [
-                  "https://picsum.photos/seed/scene2e/640/400",
-                  "https://picsum.photos/seed/scene2f/640/400",
-                  "https://picsum.photos/seed/scene2g/640/400",
-                  "https://picsum.photos/seed/scene2h/640/400",
-                ],
-              },
-            ],
-          },
-        ],
-      };
+    // ======= Google Sheets endpoint (leave as your current value) =======
+    // Example: const ENDPOINT = "https://script.google.com/macros/s/AKfycbx.../exec";
+    const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
-      // ======= Google Sheets endpoint (replace after you deploy) =======
-      // Example: const ENDPOINT = "https://script.google.com/macros/s/AKfycbx.../exec";
-      const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
+    // ======= Helpers =======
+    const COLORS = ["#ff3b30","#ff9500","#ffcc00","#34c759","#00c7be","#32ade6","#5856d6","#af52de","#ff2d55","#8e8e93"];
+    const uid = () => Math.random().toString(36).slice(2, 9);
+    const pretty = (obj) => JSON.stringify(obj, null, 2);
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
 
-      // ======= Helpers =======
-      const COLORS = [
-        "#ff3b30", "#ff9500", "#ffcc00", "#34c759", "#00c7be",
-        "#32ade6", "#5856d6", "#af52de", "#ff2d55", "#8e8e93",
-      ];
-      const uid = () => Math.random().toString(36).slice(2, 9);
-      const download = (filename, text) => {
-        const el = document.createElement("a");
-        el.setAttribute("href","data:text/json;charset=utf-8," + encodeURIComponent(text));
-        el.setAttribute("download", filename);
-        el.style.display = "none";
-        document.body.appendChild(el);
-        el.click();
-        el.remove();
-      };
-      const pretty = (obj) => JSON.stringify(obj, null, 2);
-      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    // Short random rater id (stable until cleared; editable by rater)
+    const randomRaterId = () => {
+      // 4 symbols from base36, plus 2 digits → e.g., r-8f4k-27
+      const a = Math.random().toString(36).slice(2, 6);
+      const b = String(Math.floor(Math.random() * 100)).padStart(2, "0");
+      return `r-${a}-${b}`;
+    };
 
-      // ======= URL config loader =======
-      function getConfigParam() {
-        try {
-          const sp = new URLSearchParams(window.location.search);
-          const u = sp.get('config');
-          return u && u.trim() ? u.trim() : null;
-        } catch {
-          return null;
+    // URL config loader (for ?config=https://…/study.json)
+    function getConfigParam() {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const u = sp.get('config');
+        return u && u.trim() ? u.trim() : null;
+      } catch { return null; }
+    }
+
+    function download(filename, text) {
+      const el = document.createElement("a");
+      el.setAttribute("href","data:text/json;charset=utf-8," + encodeURIComponent(text));
+      el.setAttribute("download", filename);
+      el.style.display = "none";
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+    }
+
+    // ======= ImageBox (no cropping, draws overlays) =======
+    function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing }) {
+      const ref = React.useRef(null);
+      const [drag, setDrag] = React.useState(null); // {startX, startY, curX, curY}
+      const [imgDims, setImgDims] = React.useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
+
+      React.useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const img = el.querySelector("img");
+        function update() {
+          if (!img) return;
+          setImgDims({
+            naturalW: img.naturalWidth || 1,
+            naturalH: img.naturalHeight || 1,
+            clientW: img.clientWidth || 1,
+            clientH: img.clientHeight || 1,
+          });
         }
-      }
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+      }, [src]);
 
+      const start = (e) => {
+        if (!activePairId) return;
+        onStartDrawing?.();
+        const box = ref.current.getBoundingClientRect();
+        const x = clamp(e.clientX - box.left, 0, box.width);
+        const y = clamp(e.clientY - box.top, 0, box.height);
+        setDrag({ startX: x, startY: y, curX: x, curY: y });
+      };
+      const move = (e) => {
+        if (!drag) return;
+        const box = ref.current.getBoundingClientRect();
+        const x = clamp(e.clientX - box.left, 0, box.width);
+        const y = clamp(e.clientY - box.top, 0, box.height);
+        setDrag((d) => ({ ...d, curX: x, curY: y }));
+      };
+      const end = () => {
+        if (!drag) return;
+        const { startX, startY, curX, curY } = drag;
+        const box = ref.current.getBoundingClientRect();
+        const x = Math.min(startX, curX);
+        const y = Math.min(startY, curY);
+        const w = Math.abs(curX - startX);
+        const h = Math.abs(curY - startY);
+        // normalize to image natural pixels
+        const nx = (x / box.width) * imgDims.naturalW;
+        const ny = (y / box.height) * imgDims.naturalH;
+        const nw = (w / box.width) * imgDims.naturalW;
+        const nh = (h / box.height) * imgDims.naturalH;
+        onFinishRect?.(activePairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
+        setDrag(null);
+      };
 
-      // ======= Types (JSDoc for clarity)
-      /**
-       * @typedef {{ x:number, y:number, w:number, h:number, imageIndex:number }} Rect
-       * @typedef {{ pairId:string, color:string, label:string, visible:boolean, rects:Rect[] }} Pair
-       * @typedef {{ setId:string, noInconsistencies:boolean, pairs:Pair[] }} SetAnno
-       * @typedef {{ sceneId:string, sets:Record<string, SetAnno> }} SceneAnno
-       */
+      const toClient = (r) => {
+        const bx = r.x / imgDims.naturalW;
+        const by = r.y / imgDims.naturalH;
+        const bw = r.w / imgDims.naturalW;
+        const bh = r.h / imgDims.naturalH;
+        return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
+      };
 
-      // ======= Storage keys =======
-      const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
-
-      // ======= Image Box with drawing =======
-      function ImageBox({
-        src,
-        imageIndex,
-        pairs,
-        activePairId,
-        onFinishRect,     // (pairId, rect)
-        onStartDrawing,   // () => void
-      }) {
-        const ref = React.useRef(null);
-        const [drag, setDrag] = React.useState(null); // {startX, startY, curX, curY}
-        const [imgDims, setImgDims] = React.useState({
-          naturalW: 0, naturalH: 0, clientW: 0, clientH: 0
-        });
-
-        React.useEffect(() => {
-          const el = ref.current;
-          if (!el) return;
-          const img = el.querySelector("img");
-
-          function update() {
-            if (!img) return;
-            setImgDims({
-              naturalW: img.naturalWidth || 1,
-              naturalH: img.naturalHeight || 1,
-              clientW: img.clientWidth || 1,
-              clientH: img.clientHeight || 1,
-            });
+      return (
+        <div
+          ref={ref}
+          onMouseDown={start}
+          onMouseMove={move}
+          onMouseUp={end}
+          className="relative w-full select-none bg-white rounded-xl"
+          title="Click-drag to draw a rectangle"
+        >
+          <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
+          {pairs.map((p) =>
+            p.rects.filter((r) => r.imageIndex === imageIndex).map((r, i) => (
+              <div key={p.pairId + i} className="absolute box-border"
+                style={{ ...toClient(r), border: `3px solid ${p.color}`, borderRadius: 8,
+                        background: p.pairId === activePairId ? `${p.color}22` : "transparent" }}>
+                <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
+                  {p.label || "#" + p.pairId.slice(-3)}
+                </div>
+              </div>
+            )))
           }
-          update();
-          const ro = new ResizeObserver(update);
-          ro.observe(el);
-          return () => ro.disconnect();
-        }, [src]);
+          {drag && (
+            <div className="absolute border-2 border-dashed pointer-events-none"
+                style={{ left: Math.min(drag.startX, drag.curX), top: Math.min(drag.startY, drag.curY),
+                          width: Math.abs(drag.curX - drag.startX), height: Math.abs(drag.curY - drag.startY),
+                          borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000" }} />
+          )}
+        </div>
+      );
+    }
 
-        const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-        const start = (e) => {
-          if (!activePairId) return; // only draw when a pair is active
-          onStartDrawing?.();
-          const box = ref.current.getBoundingClientRect();
-          const x = clamp(e.clientX - box.left, 0, box.width);
-          const y = clamp(e.clientY - box.top, 0, box.height);
-          setDrag({ startX: x, startY: y, curX: x, curY: y });
-        };
-        const move = (e) => {
-          if (!drag) return;
-          const box = ref.current.getBoundingClientRect();
-          const x = clamp(e.clientX - box.left, 0, box.width);
-          const y = clamp(e.clientY - box.top, 0, box.height);
-          setDrag((d) => ({ ...d, curX: x, curY: y }));
-        };
-        const end = () => {
-          if (!drag) return;
-          const { startX, startY, curX, curY } = drag;
-          const box = ref.current.getBoundingClientRect();
-          const x = Math.min(startX, curX);
-          const y = Math.min(startY, curY);
-          const w = Math.abs(curX - startX);
-          const h = Math.abs(curY - startY);
-
-          // normalize to image natural pixels
-          const nx = (x / box.width) * imgDims.naturalW;
-          const ny = (y / box.height) * imgDims.naturalH;
-          const nw = (w / box.width) * imgDims.naturalW;
-          const nh = (h / box.height) * imgDims.naturalH;
-
-          onFinishRect?.(activePairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
-          setDrag(null);
-        };
-
-        const toClient = (r) => {
-          const bx = r.x / imgDims.naturalW;
-          const by = r.y / imgDims.naturalH;
-          const bw = r.w / imgDims.naturalW;
-          const bh = r.h / imgDims.naturalH;
-          return {
-            left: `${bx * 100}%`,
-            top: `${by * 100}%`,
-            width: `${bw * 100}%`,
-            height: `${bh * 100}%`,
-          };
-        };
-
-        return (
-          <div
-            ref={ref}
-            onMouseDown={start}
-            onMouseMove={move}
-            onMouseUp={end}
-            className="relative w-full select-none bg-white rounded-xl"
-            title="Click-drag to draw a rectangle"
-          >
-            <img
-              src={src}
-              alt="view"
-              className="w-full h-auto object-contain block"
-              draggable={false}
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                // should log 512x512 for your assets
-                console.debug('Loaded image:', img.naturalWidth, 'x', img.naturalHeight, src);
-              }}
-            />
-
-            {/* Existing rectangles */}
-            {pairs.map((p) =>
-              p.rects
-                .filter((r) => r.imageIndex === imageIndex)
-                .map((r, i) => (
-                  <div
-                    key={p.pairId + i}
-                    className="absolute box-border"
-                    style={{
-                      ...toClient(r),
-                      border: `3px solid ${p.color}`,
-                      borderRadius: 8,
-                      background: p.pairId === activePairId ? `${p.color}22` : "transparent",
-                    }}
-                  >
-                    <div
-                      className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white"
-                      style={{ background: p.color }}
-                    >
-                      {p.label || "#" + p.pairId.slice(-3)}
-                    </div>
-                  </div>
-                ))
-            )}
-
-            {/* Live rubberband */}
-            {drag && (
-              <div
-                className="absolute border-2 border-dashed pointer-events-none"
-                style={{
-                  left: Math.min(drag.startX, drag.curX),
-                  top: Math.min(drag.startY, drag.curY),
-                  width: Math.abs(drag.curX - drag.startX),
-                  height: Math.abs(drag.curY - drag.startY),
-                  borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000",
-                }}
+    function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing }) {
+      return (
+        <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
+          {setDef.images.map((src, idx) => (
+            <div key={idx}>
+              <ImageBox
+                src={src}
+                imageIndex={idx}
+                pairs={anno.pairs.filter((p) => p.visible)}
+                activePairId={activePairId}
+                onFinishRect={onFinishRect}
+                onStartDrawing={onStartDrawing}
               />
-            )}
-          </div>
-        );
-      }
-
-
-      // ======= SetViewer (2x2 grid) =======
-      function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing }) {
-        return (
-          <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
-            {setDef.images.map((src, idx) => (
-              <div key={idx}>
-                <ImageBox
-                  src={src}
-                  imageIndex={idx}
-                  pairs={anno.pairs.filter((p) => p.visible)}
-                  activePairId={activePairId}
-                  onFinishRect={onFinishRect}
-                  onStartDrawing={onStartDrawing}
-                />
-              </div>
-            ))}
-          </div>
-        );
-      }
-
-
-      // ======= Sidebar Controls =======
-      function Sidebar({
-        setAnno,
-        onChange,
-        onNewPair,
-        onDeletePair,
-        onTogglePair,
-        onLabelPair,
-        activePairId,
-        setActivePairId,
-        canFinishScene,
-        onNextScene,
-        onPrevScene,
-      }) {
-        const pairs = setAnno.pairs;
-        const nextColor = useMemo(() => COLORS[pairs.length % COLORS.length], [pairs.length]);
-
-        return (
-          <div className="w-full lg:w-80 shrink-0 flex flex-col gap-3">
-            <div className="p-3 rounded-xl border bg-white shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">Current set</div>
-                <button
-                  className={`text-xs px-2 py-1 rounded-md border ${
-                    setAnno.noInconsistencies ? "bg-green-50 border-green-300" : ""
-                  }`}
-                  onClick={() => onChange({ ...setAnno, noInconsistencies: !setAnno.noInconsistencies })}
-                >
-                  {setAnno.noInconsistencies ? "No inconsistencies ✓" : "Mark no inconsistencies"}
-                </button>
-              </div>
-              <div className="text-xs text-neutral-500 mt-1">
-                Either add ≥1 pair OR mark “No inconsistencies”.
-              </div>
             </div>
+          ))}
+        </div>
+      );
+    }
 
-            <div className="p-3 rounded-xl border bg-white shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">Pairs</div>
-                <button
-                  className="text-xs px-3 py-1 rounded-md border"
-                  title="N"
-                  onClick={() => onNewPair(nextColor)}
-                >
-                  New pair (N)
-                </button>
-              </div>
-              <div className="text-xs text-neutral-500 mt-1">
-                Start a pair, then draw rectangles on two views.
-              </div>
+    function Sidebar({
+      setAnno, onChange, onNewPair, onDeletePair, onTogglePair, onLabelPair,
+      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene
+    }) {
+      const pairs = setAnno.pairs;
+      const nextColor = useMemo(() => COLORS[pairs.length % COLORS.length], [pairs.length]);
 
-              <div className="mt-3 flex flex-col gap-2 max-h-64 overflow-auto pr-1">
-                {pairs.length === 0 && (
-                  <div className="text-sm text-neutral-400">No pairs yet.</div>
-                )}
-                {pairs.map((p) => (
-                  <div key={p.pairId} className="border rounded-lg p-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-block w-3 h-3 rounded-full" style={{ background: p.color }} />
-                        <button
-                          className={`text-xs px-2 py-0.5 rounded ${
-                            activePairId === p.pairId ? "bg-neutral-800 text-white" : "bg-neutral-100"
-                          }`}
-                          onClick={() => setActivePairId(p.pairId)}
-                          title="Make active to draw its rectangles"
-                        >
-                          Pair {p.pairId.slice(-3)}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          className={`text-xs px-2 py-0.5 rounded border ${p.visible ? "" : "opacity-50"}`}
-                          onClick={() => onTogglePair(p.pairId)}
-                        >
-                          {p.visible ? "Hide" : "Show"}
-                        </button>
-                        <button
-                          className="text-xs px-2 py-0.5 rounded border"
-                          onClick={() => onDeletePair(p.pairId)}
-                        >
-                          Delete
-                        </button>
-                      </div>
+      return (
+        <div className="w-full lg:w-80 shrink-0 flex flex-col gap-3">
+          <div className="p-3 rounded-xl border bg-white shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Current set</div>
+              <button
+                className={`text-xs px-2 py-1 rounded-md border ${setAnno.noInconsistencies ? "bg-green-50 border-green-300" : ""}`}
+                onClick={() => onChange({ ...setAnno, noInconsistencies: !setAnno.noInconsistencies })}
+              >
+                {setAnno.noInconsistencies ? "No inconsistencies ✓" : "Mark no inconsistencies"}
+              </button>
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Either add ≥1 pair OR mark “No inconsistencies”.</div>
+          </div>
+
+          <div className="p-3 rounded-xl border bg-white shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Pairs</div>
+              <button className="text-xs px-3 py-1 rounded-md border" title="N" onClick={() => onNewPair(nextColor)}>
+                New pair (N)
+              </button>
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Start a pair, then draw rectangles on two views.</div>
+
+            <div className="mt-3 flex flex-col gap-2 max-h-64 overflow-auto pr-1">
+              {pairs.length === 0 && <div className="text-sm text-neutral-400">No pairs yet.</div>}
+              {pairs.map((p) => (
+                <div key={p.pairId} className="border rounded-lg p-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full" style={{ background: p.color }} />
+                      <button
+                        className={`text-xs px-2 py-0.5 rounded ${activePairId === p.pairId ? "bg-neutral-800 text-white" : "bg-neutral-100"}`}
+                        onClick={() => setActivePairId(p.pairId)}
+                        title="Make active to draw its rectangles"
+                      >
+                        Pair {p.pairId.slice(-3)}
+                      </button>
                     </div>
-                    <input
-                      className="mt-2 w-full text-sm px-2 py-1 rounded-md border"
-                      placeholder="Label (e.g., nose tip, eyebrow...)"
-                      value={p.label}
-                      onChange={(e) => onLabelPair(p.pairId, e.target.value)}
-                    />
-                    <div className="text-[11px] text-neutral-500 mt-1">
-                      Rectangles: {p.rects.length} / 2
+                    <div className="flex items-center gap-2">
+                      <button className={`text-xs px-2 py-0.5 rounded border ${p.visible ? "" : "opacity-50"}`}
+                              onClick={() => onTogglePair(p.pairId)}>
+                        {p.visible ? "Hide" : "Show"}
+                      </button>
+                      <button className="text-xs px-2 py-0.5 rounded border" onClick={() => onDeletePair(p.pairId)}>
+                        Delete
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl border bg-white shadow-sm flex flex-col gap-2">
-              <div className="text-xs text-neutral-500">
-                Shortcuts: <kbd>N</kbd> new pair, <kbd>Backspace</kbd> delete active pair, draw with mouse.
-              </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-2 rounded-lg border" onClick={onPrevScene}>
-                  ◀ Prev scene
-                </button>
-                <button
-                  className={`px-3 py-2 rounded-lg border ${canFinishScene ? "bg-black text-white" : "opacity-50"}`}
-                  disabled={!canFinishScene}
-                  onClick={onNextScene}
-                >
-                  Next scene ▶
-                </button>
-              </div>
+                  <input
+                    className="mt-2 w-full text-sm px-2 py-1 rounded-md border"
+                    placeholder="Label (e.g., nose tip, eyebrow...)"
+                    value={p.label}
+                    onChange={(e) => onLabelPair(p.pairId, e.target.value)}
+                  />
+                  <div className="text-[11px] text-neutral-500 mt-1">Rectangles: {p.rects.length} / 2</div>
+                </div>
+              ))}
             </div>
           </div>
-        );
+
+          <div className="p-3 rounded-xl border bg-white shadow-sm flex flex-col gap-2">
+            <div className="text-xs text-neutral-500">
+              Shortcuts: <kbd>N</kbd> new pair, <kbd>Backspace</kbd> delete active pair, draw with mouse.
+            </div>
+            <div className="flex gap-2">
+              <button className="px-3 py-2 rounded-lg border" onClick={onPrevScene}>◀ Prev scene</button>
+              <button className={`px-3 py-2 rounded-lg border ${canFinishScene ? "bg-black text-white" : "opacity-50"}`}
+                      disabled={!canFinishScene} onClick={onNextScene}>Next scene ▶</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Intro / Instructions screen shown before scenes
+    function IntroScreen({ study, raterId, setRaterId, onStart, onClearAll }) {
+      return (
+        <div className="max-w-3xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
+          <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
+          <p className="text-sm text-neutral-700 mb-4">
+            Task: For each scene, you’ll see two sets of 4 views (two algorithms). Mark <b>paired rectangles</b> on
+            corresponding views where the 3D appearance is inconsistent (shape, pose, identity, lighting-consistency artifacts, etc.).
+          </p>
+          <ol className="list-decimal ml-6 text-sm text-neutral-800 space-y-1 mb-4">
+            <li>Pick a set tab at the top.</li>
+            <li>Click <b>New pair (N)</b>, then draw a rectangle on one view and a matching rectangle on another view.</li>
+            <li>Optionally label pairs (e.g., “nose tip”, “eyebrow”).</li>
+            <li>You can add multiple pairs; or if consistent, click <b>Mark no inconsistencies</b>.</li>
+            <li>Proceed when both sets are annotated (pairs or none).</li>
+          </ol>
+
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-sm w-24">Rater ID</label>
+            <input
+              className="flex-1 text-sm px-3 py-2 rounded-md border"
+              placeholder="e.g., r-8f4k-27"
+              value={raterId}
+              onChange={(e) => setRaterId(e.target.value)}
+            />
+            <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())}>
+              Randomize
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
+            <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
+                    disabled={!raterId} onClick={onStart}>
+              Start rating ▶
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Header
+    function HeaderBar({ study, progressText, raterId, setRaterId, onExport, onSubmit, onClearAll, onShowIntro }) {
+      return (
+        <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="text-lg font-semibold">3D Consistency Rater</div>
+              <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
+              <div className="text-xs text-neutral-500">{progressText}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
+                    value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onShowIntro}>Instructions</button>
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onExport}>Export JSON</button>
+              <button className={`text-sm px-3 py-1.5 rounded-md border ${!raterId || ENDPOINT.includes("PASTE_") ? "opacity-50" : "bg-black text-white"}`}
+                      disabled={!raterId || ENDPOINT.includes("PASTE_")}
+                      onClick={onSubmit} title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}>
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ======= Main App =======
+    function App() {
+      const [study, setStudy] = useState(SAMPLE_STUDY);
+      const [sceneIdx, setSceneIdx] = useState(0);
+      const [setTab, setSetTab] = useState(0);
+      const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
+      const [activePairId, setActivePairId] = useState(null);
+      const [loadingConfig, setLoadingConfig] = useState(false);
+      const [configError, setConfigError] = useState(null);
+      const [configSource, setConfigSource] = useState(null);
+
+      // phase: 'intro' | 'rate'
+      const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
+
+      // rater id (auto-generate if missing)
+      const [raterId, setRaterId] = useState(() => {
+        const saved = localStorage.getItem('mv3d_rater_id');
+        return saved && saved.trim() ? saved : randomRaterId();
+      });
+
+      // persist annos and rater id, phase
+      useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
+      useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
+      useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
+
+      // keyboard shortcuts — DO NOT fire when typing in inputs/textarea/contentEditable
+      useEffect(() => {
+        const h = (e) => {
+          const tag = e.target && e.target.tagName;
+          const isTyping =
+            (tag === 'INPUT' || tag === 'TEXTAREA') ||
+            (e.target && e.target.isContentEditable);
+          if (isTyping) return; // <-- crucial fix
+
+          if (e.key === "n" || e.key === "N") {
+            e.preventDefault();
+            newPair();
+          } else if (e.key === "Backspace") {
+            // only when not typing & an active pair exists
+            if (activePairId) {
+              e.preventDefault();
+              deletePair(activePairId);
+            }
+          }
+        };
+        window.addEventListener("keydown", h);
+        return () => window.removeEventListener("keydown", h);
+      }, [activePairId, sceneIdx, setTab, annos]);
+
+      // auto-load config from ?config=...
+      useEffect(() => {
+        const url = getConfigParam();
+        if (!url) return;
+        let cancelled = false;
+        (async () => {
+          try {
+            setLoadingConfig(true);
+            setConfigError(null);
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (!cancelled) {
+              onImport(json);
+              setConfigSource(url);
+            }
+          } catch (err) {
+            if (!cancelled) setConfigError(String(err));
+          } finally {
+            if (!cancelled) setLoadingConfig(false);
+          }
+        })();
+        return () => { cancelled = true; };
+      }, []);
+
+      const currentScene = study.scenes[sceneIdx];
+      const [defA, defB] = currentScene.sets;
+      const setDef = setTab === 0 ? defA : defB;
+      const sceneAnno = annos[currentScene.sceneId];
+      const setAnno = sceneAnno.sets[setDef.setId];
+
+      function loadInitialAnnos(studyObj) {
+        const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
+        if (saved) {
+          try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === "object") return parsed; } catch {}
+        }
+        const blank = {};
+        for (const sc of studyObj.scenes) {
+          const setsMap = {};
+          for (const s of sc.sets) setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
+          blank[sc.sceneId] = { sceneId: sc.sceneId, sets: setsMap };
+        }
+        return blank;
       }
 
-      // ======= Header (import/export/submit) =======
-      function HeaderBar({ study, onImport, onExport, progressText, raterId, setRaterId, onSubmit }) {
-        const fileRef = useRef(null);
-        const [showHelp, setShowHelp] = useState(false);
+      function updateSetAnno(upd) {
+        setAnnos((prev) => ({
+          ...prev,
+          [currentScene.sceneId]: {
+            ...prev[currentScene.sceneId],
+            sets: {
+              ...prev[currentScene.sceneId].sets,
+              [setDef.setId]: upd,
+            },
+          },
+        }));
+      }
 
-        const doImport = (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-            try {
-              const json = JSON.parse(String(evt.target?.result || ""));
-              onImport(json);
-            } catch (err) {
-              alert("Invalid JSON.");
-            }
-          };
-          reader.readAsText(file);
-        };
+      function newPair(color) {
+        const colorToUse = color || COLORS[setAnno.pairs.length % COLORS.length];
+        const p = { pairId: uid(), color: colorToUse, label: "", visible: true, rects: [] };
+        updateSetAnno({ ...setAnno, noInconsistencies: false, pairs: [...setAnno.pairs, p] });
+        setActivePairId(p.pairId);
+      }
 
-        return (
-          <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
-            <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="text-lg font-semibold">3D Consistency Rater</div>
-                <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
-                <div className="text-xs text-neutral-500">{progressText}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Rater ID field */}
-                <input
-                  className="text-sm px-2 py-1.5 rounded-md border w-36"
-                  placeholder="Rater ID"
-                  value={raterId}
-                  onChange={(e) => setRaterId(e.target.value)}
-                  title="Enter your rater ID"
-                />
-                <button
-                  className="text-sm px-3 py-1.5 rounded-md border"
-                  onClick={() => setShowHelp(true)}
-                >
-                  Help
-                </button>
-                <input type="file" ref={fileRef} accept="application/json" hidden onChange={doImport} />
-                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => fileRef.current?.click()}>
-                  Import config/results
-                </button>
-                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onExport}>
-                  Export results JSON
-                </button>
-                <button
-                  className={`text-sm px-3 py-1.5 rounded-md border ${!raterId || ENDPOINT.includes("PASTE_") ? "opacity-50" : "bg-black text-white"}`}
-                  disabled={!raterId || ENDPOINT.includes("PASTE_")}
-                  onClick={onSubmit}
-                  title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}
-                >
-                  Submit
-                </button>
-              </div>
-            </div>
+      function deletePair(pairId) {
+        if (!confirm("Delete this pair?")) return;
+        const next = setAnno.pairs.filter((p) => p.pairId !== pairId);
+        updateSetAnno({ ...setAnno, pairs: next });
+        if (activePairId === pairId) setActivePairId(null);
+      }
 
-            {showHelp && (
-              <div className="max-w-3xl mx-auto mt-3 p-3 rounded-xl border bg-white shadow">
-                <div className="font-semibold mb-1">Instructions for Raters</div>
-                <ol className="list-decimal ml-5 text-sm leading-relaxed">
-                  <li>Each scene has two 4-image sets. Compare views within a set.</li>
-                  <li>Click <b>New pair</b> (or press <kbd>N</kbd>), then click-drag a rectangle over an inconsistent region in one view.</li>
-                  <li>Then draw the matching rectangle on the corresponding view where the inconsistency appears.</li>
-                  <li>Optionally type a label (e.g., <i>nose tip</i>, <i>eyebrow</i>).</li>
-                  <li>You may create multiple pairs. Use the list to show/hide or delete.</li>
-                  <li>If a set looks consistent, click <b>Mark no inconsistencies</b>.</li>
-                  <li>Proceed only after both sets are marked (pairs or none).</li>
-                </ol>
-                <div className="mt-2 text-sm text-neutral-500">Admins can export JSON to collect annotations.</div>
-                <div className="mt-3">
-                  <button className="px-3 py-1.5 rounded-md border" onClick={() => setShowHelp(false)}>Close</button>
-                </div>
+      function togglePair(pairId) {
+        const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
+        updateSetAnno({ ...setAnno, pairs: next });
+      }
+
+      function labelPair(pairId, label) {
+        const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, label } : p));
+        updateSetAnno({ ...setAnno, pairs: next });
+      }
+
+      function handleFinishRect(pairId, rect) {
+        const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
+        if (idx < 0) return;
+        const p = setAnno.pairs[idx];
+        if (p.rects.length >= 2) return;
+        const updated = { ...p, rects: [...p.rects, rect] };
+        const arr = [...setAnno.pairs];
+        arr[idx] = updated;
+        updateSetAnno({ ...setAnno, pairs: arr });
+        if (updated.rects.length >= 2) setActivePairId(null);
+      }
+
+      function onImport(json) {
+        if (json && json.scenes && json.setNames) {
+          setStudy(json);
+          setAnnos(loadInitialAnnos(json));
+          setSceneIdx(0);
+          setSetTab(0);
+          setActivePairId(null);
+        } else if (json && json.studyId && typeof json === "object") {
+          if (json.annos) setAnnos(json.annos);
+          if (json.study) setStudy(json.study);
+        } else {
+          alert("Unrecognized JSON format.");
+        }
+      }
+
+      function onExport() {
+        const payload = { study, annos, exportedAt: new Date().toISOString() };
+        download(`${study.studyId}__results.json`, pretty(payload));
+      }
+
+      function canProceedScene() {
+        const [s0, s1] = currentScene.sets;
+        const a0 = annos[currentScene.sceneId].sets[s0.setId];
+        const a1 = annos[currentScene.sceneId].sets[s1.setId];
+        const ok = (a) => a.noInconsistencies || a.pairs.some((p) => p.rects.length === 2);
+        return ok(a0) && ok(a1);
+      }
+
+      function gotoNextScene() {
+        if (sceneIdx < study.scenes.length - 1) {
+          setSceneIdx(sceneIdx + 1);
+          setSetTab(0);
+          setActivePairId(null);
+        } else {
+          alert("You’ve reached the last scene. Export or Submit your results.");
+        }
+      }
+      function gotoPrevScene() {
+        if (sceneIdx > 0) {
+          setSceneIdx(sceneIdx - 1);
+          setSetTab(0);
+          setActivePairId(null);
+        }
+      }
+
+      async function submitToServer() {
+        try {
+          if (!raterId) { alert('Please enter your Rater ID.'); return; }
+          if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
+            alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
+            return;
+          }
+          const fd = new FormData();
+          fd.append('raterId', raterId);
+          fd.append('studyId', study.studyId);
+          fd.append('payload', JSON.stringify({ study, annos, exportedAt: new Date().toISOString() }));
+          await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
+          alert('Submitted! Check the Google Sheet for the new row.');
+        } catch (err) {
+          console.error('Submission failed:', err);
+          alert('Submission failed. See console.');
+        }
+      }
+
+      function clearAllData() {
+        if (!confirm('This will clear your rater ID and ALL saved annotations for this study on this device. Continue?')) return;
+        try {
+          localStorage.removeItem('mv3d_rater_id');
+          localStorage.removeItem('mv3d_phase');
+          localStorage.removeItem(LS_KEY(study.studyId));
+        } catch {}
+        // reset state
+        setRaterId(randomRaterId());
+        setAnnos(loadInitialAnnos(study));
+        setSceneIdx(0);
+        setSetTab(0);
+        setActivePairId(null);
+        setPhase('intro');
+        alert('Cleared. You can start fresh.');
+      }
+
+      const progressText = phase === 'rate'
+        ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
+        : `Instructions`;
+
+      return (
+        <div className="min-h-screen bg-neutral-50 text-neutral-900">
+          <HeaderBar
+            study={study}
+            progressText={progressText}
+            raterId={raterId}
+            setRaterId={setRaterId}
+            onExport={onExport}
+            onSubmit={submitToServer}
+            onClearAll={clearAllData}
+            onShowIntro={() => setPhase('intro')}
+          />
+
+          <div className="max-w-7xl mx-auto p-3 lg:p-5">
+            {/* Config load status */}
+            {loadingConfig && (
+              <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
+                Loading study config from URL…
               </div>
             )}
-          </div>
-        );
-      }
-
-      // ======= Main App =======
-      function App() {
-        const [study, setStudy] = useState(SAMPLE_STUDY);
-        const [sceneIdx, setSceneIdx] = useState(0);
-        const [setTab, setSetTab] = useState(0); // 0 or 1 corresponds to setNames order
-        const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
-        const [activePairId, setActivePairId] = useState(null);
-        const [raterId, setRaterId] = useState(localStorage.getItem('mv3d_rater_id') || '');
-        const [loadingConfig, setLoadingConfig] = useState(false);
-        const [configError, setConfigError] = useState(null);
-        const [configSource, setConfigSource] = useState(null);
-
-
-        // persist annotations
-        useEffect(() => {
-          localStorage.setItem(LS_KEY(study.studyId), pretty(annos));
-        }, [annos, study.studyId]);
-
-        // persist rater id
-        useEffect(() => {
-          localStorage.setItem('mv3d_rater_id', raterId);
-        }, [raterId]);
-
-        // keyboard shortcuts
-        useEffect(() => {
-          const h = (e) => {
-            if (e.key === "n" || e.key === "N") {
-              e.preventDefault();
-              newPair();
-            } else if (e.key === "Backspace") {
-              e.preventDefault();
-              if (activePairId) deletePair(activePairId);
-            }
-          };
-          window.addEventListener("keydown", h);
-          return () => window.removeEventListener("keydown", h);
-        }, [activePairId, sceneIdx, setTab, annos]);
-
-        // auto-load study config from ?config=... URL parameter (once on mount)
-        useEffect(() => {
-          const url = getConfigParam();
-          if (!url) return;
-          let cancelled = false;
-          (async () => {
-            try {
-              setLoadingConfig(true);
-              setConfigError(null);
-              const res = await fetch(url, { cache: 'no-store' });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              const json = await res.json();
-              if (!cancelled) {
-                onImport(json);        // reuse your existing importer (sets study + annos)
-                setConfigSource(url);  // remember where it came from
-              }
-            } catch (err) {
-              if (!cancelled) setConfigError(String(err));
-            } finally {
-              if (!cancelled) setLoadingConfig(false);
-            }
-          })();
-          return () => { cancelled = true; };
-        }, []);
-
-
-        const currentScene = study.scenes[sceneIdx];
-        const [defA, defB] = currentScene.sets;
-
-        const setDef = setTab === 0 ? defA : defB;
-        const sceneAnno = annos[currentScene.sceneId];
-        const setAnno = sceneAnno.sets[setDef.setId];
-
-        function loadInitialAnnos(studyObj) {
-          const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (parsed && typeof parsed === "object") return parsed;
-            } catch {}
-          }
-          const blank = {};
-          for (const sc of studyObj.scenes) {
-            const setsMap = {};
-            for (const s of sc.sets) {
-              setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
-            }
-            blank[sc.sceneId] = { sceneId: sc.sceneId, sets: setsMap };
-          }
-          return blank;
-        }
-
-        function updateSetAnno(upd) {
-          setAnnos((prev) => ({
-            ...prev,
-            [currentScene.sceneId]: {
-              ...prev[currentScene.sceneId],
-              sets: {
-                ...prev[currentScene.sceneId].sets,
-                [setDef.setId]: upd,
-              },
-            },
-          }));
-        }
-
-        function newPair(color) {
-          const colorToUse = color || COLORS[setAnno.pairs.length % COLORS.length];
-          const p = { pairId: uid(), color: colorToUse, label: "", visible: true, rects: [] };
-          updateSetAnno({ ...setAnno, noInconsistencies: false, pairs: [...setAnno.pairs, p] });
-          setActivePairId(p.pairId);
-        }
-
-        function deletePair(pairId) {
-          if (!confirm("Delete this pair?")) return;
-          const next = setAnno.pairs.filter((p) => p.pairId !== pairId);
-          updateSetAnno({ ...setAnno, pairs: next });
-          if (activePairId === pairId) setActivePairId(null);
-        }
-
-        function togglePair(pairId) {
-          const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
-          updateSetAnno({ ...setAnno, pairs: next });
-        }
-
-        function labelPair(pairId, label) {
-          const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, label } : p));
-          updateSetAnno({ ...setAnno, pairs: next });
-        }
-
-        function handleFinishRect(pairId, rect) {
-          const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
-          if (idx < 0) return;
-          const p = setAnno.pairs[idx];
-          if (p.rects.length >= 2) return; // enforce pair of 2
-          const updated = { ...p, rects: [...p.rects, rect] };
-          const arr = [...setAnno.pairs];
-          arr[idx] = updated;
-          updateSetAnno({ ...setAnno, pairs: arr });
-          if (updated.rects.length >= 2) setActivePairId(null);
-        }
-
-        function onImport(json) {
-          if (json && json.scenes && json.setNames) {
-            setStudy(json);
-            setAnnos(loadInitialAnnos(json));
-            setSceneIdx(0);
-            setSetTab(0);
-            setActivePairId(null);
-          } else if (json && json.studyId && typeof json === "object") {
-            if (json.annos) setAnnos(json.annos);
-            if (json.study) setStudy(json.study);
-          } else {
-            alert("Unrecognized JSON format.");
-          }
-        }
-
-        function onExport() {
-          const payload = { study, annos, exportedAt: new Date().toISOString() };
-          download(`${study.studyId}__results.json`, pretty(payload));
-        }
-
-        function canProceedScene() {
-          const [s0, s1] = currentScene.sets;
-          const a0 = annos[currentScene.sceneId].sets[s0.setId];
-          const a1 = annos[currentScene.sceneId].sets[s1.setId];
-          const ok = (a) => a.noInconsistencies || a.pairs.some((p) => p.rects.length === 2);
-          return ok(a0) && ok(a1);
-        }
-
-        function gotoNextScene() {
-          if (sceneIdx < study.scenes.length - 1) {
-            setSceneIdx(sceneIdx + 1);
-            setSetTab(0);
-            setActivePairId(null);
-          } else {
-            alert("You’ve reached the last scene. Export or Submit your results.");
-          }
-        }
-        function gotoPrevScene() {
-          if (sceneIdx > 0) {
-            setSceneIdx(sceneIdx - 1);
-            setSetTab(0);
-            setActivePairId(null);
-          }
-        }
-
-        async function submitToServer() {
-            try {
-                if (!raterId) { alert('Please enter your Rater ID.'); return; }
-                if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
-                alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
-                return;
-                }
-
-                const fd = new FormData();
-                fd.append('raterId', raterId);
-                fd.append('studyId', study.studyId);
-                fd.append('payload', JSON.stringify({
-                study,
-                annos,
-                exportedAt: new Date().toISOString()
-                }));
-
-                // Using FormData avoids a preflight; `no-cors` lets the request go through
-                // from a static site even though we can't read the response.
-                await fetch(ENDPOINT, {
-                method: 'POST',
-                mode: 'no-cors',
-                body: fd
-                });
-
-                alert('Submitted! Check the Google Sheet for the new row.');
-            } catch (err) {
-                console.error('Submission failed:', err);
-                alert('Submission failed. See console.');
-            }
-        }
-
-
-        const progressText = `${sceneIdx + 1} / ${study.scenes.length} scenes`;
-
-        return (
-          <div className="min-h-screen bg-neutral-50 text-neutral-900">
-            <HeaderBar
-              study={study}
-              onImport={onImport}
-              onExport={onExport}
-              progressText={progressText}
-              raterId={raterId}
-              setRaterId={setRaterId}
-              onSubmit={submitToServer}
-            />
-
-            <div className="max-w-7xl mx-auto p-3 lg:p-5">
-              <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm">
-                <div className="text-sm text-neutral-600">{study.instructions}</div>
+            {configSource && !loadingConfig && !configError && (
+              <div className="mb-3 p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
+                Loaded config from <code className="break-all">{configSource}</code>
               </div>
-
-              {/* Config load status */}
-              {loadingConfig && (
-                <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
-                  Loading study config from URL…
-                </div>
-              )}
-              {configSource && !loadingConfig && !configError && (
-                <div className="mb-3 p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
-                  Loaded config from <code className="break-all">{configSource}</code>
-                </div>
-              )}
-              {configError && (
-                <div className="mb-3 p-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-800">
-                  Failed to load config from URL. {String(configError)}
-                </div>
-              )}
-
-
-              {/* Scene header & tabs */}
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div className="text-lg font-semibold mr-3">
-                  Scene {sceneIdx + 1}: {currentScene.title}
-                </div>
-                <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-                  {study.setNames.map((name, i) => (
-                    <button
-                      key={i}
-                      className={`px-3 py-1.5 rounded-lg text-sm ${setTab === i ? "bg-white shadow border" : "text-neutral-600"}`}
-                      onClick={() => setSetTab(i)}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
+            )}
+            {configError && (
+              <div className="mb-3 p-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-800">
+                Failed to load config from URL. {String(configError)}
               </div>
+            )}
 
-              <div className="flex flex-col lg:flex-row gap-4 items-start">
-                <div className="flex-1 w-full">
-                  <SetViewer
-                    setDef={setDef}
-                    anno={setAnno}
+            {phase === 'intro' ? (
+              <IntroScreen
+                study={study}
+                raterId={raterId}
+                setRaterId={setRaterId}
+                onStart={() => setPhase('rate')}
+                onClearAll={clearAllData}
+              />
+            ) : (
+              <>
+                <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm">
+                  <div className="text-sm text-neutral-600">{study.instructions}</div>
+                </div>
+
+                {/* Scene header & tabs */}
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <div className="text-lg font-semibold mr-3">
+                    Scene {sceneIdx + 1}: {currentScene.title}
+                  </div>
+                  <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
+                    {study.setNames.map((name, i) => (
+                      <button key={i}
+                        className={`px-3 py-1.5 rounded-lg text-sm ${setTab === i ? "bg-white shadow border" : "text-neutral-600"}`}
+                        onClick={() => setSetTab(i)}>
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col lg:flex-row gap-4 items-start">
+                  <div className="flex-1 w-full">
+                    <SetViewer
+                      setDef={setDef}
+                      anno={annos[currentScene.sceneId].sets[setDef.setId]}
+                      activePairId={activePairId}
+                      onFinishRect={handleFinishRect}
+                      onStartDrawing={() => { if (!activePairId) newPair(); }}
+                    />
+                  </div>
+                  <Sidebar
+                    setAnno={annos[currentScene.sceneId].sets[setDef.setId]}
+                    onChange={(upd) => updateSetAnno(upd)}
+                    onNewPair={(color) => newPair(color)}
+                    onDeletePair={deletePair}
+                    onTogglePair={togglePair}
+                    onLabelPair={labelPair}
                     activePairId={activePairId}
-                    onFinishRect={handleFinishRect}
-                    onStartDrawing={() => {
-                      if (!activePairId) newPair();
-                    }}
+                    setActivePairId={setActivePairId}
+                    canFinishScene={canProceedScene()}
+                    onNextScene={gotoNextScene}
+                    onPrevScene={gotoPrevScene}
                   />
                 </div>
-                <Sidebar
-                  setAnno={setAnno}
-                  onChange={updateSetAnno}
-                  onNewPair={(color) => newPair(color)}
-                  onDeletePair={deletePair}
-                  onTogglePair={togglePair}
-                  onLabelPair={labelPair}
-                  activePairId={activePairId}
-                  setActivePairId={setActivePairId}
-                  canFinishScene={canProceedScene()}
-                  onNextScene={gotoNextScene}
-                  onPrevScene={gotoPrevScene}
-                />
-              </div>
 
-              {/* Footer actions */}
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-neutral-500">
-                  Autosaved locally under <code>{LS_KEY(study.studyId)}</code>
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-neutral-500">Autosaved locally under <code>{LS_KEY(study.studyId)}</code></div>
+                  <div className="flex gap-2">
+                    <button className="px-3 py-2 rounded-lg border" onClick={() => setSetTab((t) => (t === 0 ? 1 : 0))}>
+                      Switch set (Tab)
+                    </button>
+                    <button className="px-3 py-2 rounded-lg border" onClick={onExport}>
+                      Export results JSON
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 rounded-lg border" onClick={() => setSetTab((t) => (t === 0 ? 1 : 0))}>
-                    Switch set (Tab)
-                  </button>
-                  <button className="px-3 py-2 rounded-lg border" onClick={onExport}>
-                    Export results JSON
-                  </button>
-                </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
-        );
-      }
+        </div>
+      );
+    }
 
-      // Mount the app
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(<App />);
-    </script>
+    // Mount
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+
   </body>
 </html>
