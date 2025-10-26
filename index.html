@@ -562,23 +562,36 @@
       }
 
       async function submitToServer() {
-        try {
-          if (!raterId) { alert('Please enter your Rater ID.'); return; }
-          if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
-            alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
-            return;
-          }
-          const fd = new FormData();
-          fd.append('raterId', raterId);
-          fd.append('studyId', study.studyId);
-          fd.append('payload', JSON.stringify({ study, annos, exportedAt: new Date().toISOString() }));
-          await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
-          alert('Submitted! Check the Google Sheet for the new row.');
-        } catch (err) {
-          console.error('Submission failed:', err);
-          alert('Submission failed. See console.');
+      try {
+        if (!raterId) { alert('Please enter your Rater ID.'); return; }
+        if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
+          alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
+          return;
         }
+
+        const fd = new FormData();
+        fd.append('raterId', raterId);
+        fd.append('studyId', study.studyId);
+        fd.append('payload', JSON.stringify({
+          study,
+          annos,
+          exportedAt: new Date().toISOString()
+        }));
+
+        // no-cors -> opaque response (we can't read it, but the Sheet will get it)
+        await fetch(ENDPOINT, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: fd
+        });
+
+        alert('Submitted! Check the Google Sheet for the new row.');
+      } catch (err) {
+        console.error('Submission failed:', err);
+        alert('Submission failed. See console.');
       }
+    }
+
 
       function clearAllData() {
         if (!confirm('This will clear your rater ID and ALL saved annotations for this study on this device. Continue?')) return;
