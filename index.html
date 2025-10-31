@@ -33,13 +33,10 @@
     const { useEffect, useMemo, useRef, useState } = React;
 
     // ======= CONFIG =======
-    // Optional: add a video URL to show on the Instruction screen (mp4/webm hosted anywhere, incl. GitHub)
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
-
-    // Google Sheets endpoint (Apps Script web app URL)
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
-    // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
+    // ======= SAMPLE DATA (for local dev if no ?config=) =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions:
@@ -123,16 +120,6 @@
       } catch { return null; }
     }
 
-    function download(filename, text) {
-      const el = document.createElement("a");
-      el.setAttribute("href","data:text/json;charset=utf-8," + encodeURIComponent(text));
-      el.setAttribute("download", filename);
-      el.style.display = "none";
-      document.body.appendChild(el);
-      el.click();
-      el.remove();
-    }
-
     // ======= Instructions Panel (updated text) =======
     function InstructionsPanel() {
       return (
@@ -144,30 +131,13 @@
           </p>
 
           <ul className="list-disc ml-5 space-y-1">
-            <li>
-              <b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.
-            </li>
-            <li>
-              Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.
-            </li>
-            <li>
-              Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs;
-              logos/prints/texture change across views.
-            </li>
-            <li>
-              Please <b>mark all inconsistencies you can find</b> in each set.
-            </li>
-            <li>
-              Some sets may seem consistent at first glance but contain subtle issues on closer inspection.
-            </li>
-            <li>
-              Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes).
-              <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.
-            </li>
-            <li>
-              <b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b> to
-              look for inconsistencies. If none are found, mark <b>“No inconsistencies”</b> for that set.
-            </li>
+            <li><b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.</li>
+            <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.</li>
+            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs; logos/prints/texture change across views.</li>
+            <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
+            <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
+            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
+            <li><b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b> to look for inconsistencies. If none are found, mark <b>“No inconsistencies”</b> for that set.</li>
           </ul>
 
           <p>
@@ -189,21 +159,20 @@
       );
     }
 
-    // ======= ImageBox with draw + drag + resize (bug-fixed & clamped) =======
+    // ======= ImageBox with Pointer Events (draw + move + resize; clamped & captured) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = useRef(null);
-      const [drag, setDrag] = useState(null); // drawing: {startX,startY,curX,curY}
+      const imgRef = useRef(null);
+      const [drag, setDrag] = useState(null); // {startX,startY,curX,curY}
       const [imgDims, setImgDims] = useState({ naturalW: 1, naturalH: 1, clientW: 1, clientH: 1 });
 
       // edit state for move/resize
-      const editRef = useRef(null); // { pairId, rectIndex, mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
+      const editRef = useRef(null); // { pairId, rectIndex, mode:'move'|'resize', handle?, startRect, startX, startY }
 
       useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const img = el.querySelector("img");
+        const img = imgRef.current;
+        if (!img) return;
         function update() {
-          if (!img) return;
           setImgDims({
             naturalW: img.naturalWidth || 1,
             naturalH: img.naturalHeight || 1,
@@ -211,14 +180,17 @@
             clientH: img.clientHeight || 1,
           });
         }
-        update();
+        if (img.complete) update();
+        img.addEventListener('load', update);
         const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
+        ro.observe(img);
+        return () => { try { ro.disconnect(); } catch{} img.removeEventListener('load', update); };
       }, [src]);
 
+      const getBox = () => ref.current.getBoundingClientRect();
+
       const clientToNatural = (cx, cy) => {
-        const box = ref.current.getBoundingClientRect();
+        const box = getBox();
         const x = clamp(cx - box.left, 0, box.width);
         const y = clamp(cy - box.top, 0, box.height);
         const nx = (x / box.width)  * imgDims.naturalW;
@@ -227,36 +199,34 @@
       };
 
       const clampRectToImage = (r) => {
-        const minSize = 8;
-        let x = clamp(r.x, 0, imgDims.naturalW - minSize);
-        let y = clamp(r.y, 0, imgDims.naturalH - minSize);
-        let w = clamp(r.w, minSize, imgDims.naturalW - x);
-        let h = clamp(r.h, minSize, imgDims.naturalH - y);
+        const min = 8;
+        let x = clamp(r.x, 0, imgDims.naturalW - min);
+        let y = clamp(r.y, 0, imgDims.naturalH - min);
+        let w = clamp(r.w, min, imgDims.naturalW - x);
+        let h = clamp(r.h, min, imgDims.naturalH - y);
         return { ...r, x, y, w, h };
       };
 
-      // DRAWING on background
-      const onBackgroundMouseDown = (e) => {
-        // ignore if starting on an existing rect or handle
+      // ---- Pointer handlers (capture keeps us safe even if pointer leaves) ----
+      const onBackgroundPointerDown = (e) => {
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
         onStartDrawing?.();
 
-        const box = ref.current.getBoundingClientRect();
+        ref.current.setPointerCapture(e.pointerId);
+        const box = getBox();
         const x = clamp(e.clientX - box.left, 0, box.width);
         const y = clamp(e.clientY - box.top, 0, box.height);
         setDrag({ startX: x, startY: y, curX: x, curY: y });
       };
 
-      const onMouseMove = (e) => {
-        // drawing rubber-band
+      const onPointerMove = (e) => {
         if (drag) {
-          const box = ref.current.getBoundingClientRect();
+          const box = getBox();
           const x = clamp(e.clientX - box.left, 0, box.width);
           const y = clamp(e.clientY - box.top, 0, box.height);
-          setDrag((d) => ({ ...d, curX: x, curY: y }));
+          setDrag((d) => d ? { ...d, curX: x, curY: y } : null);
         }
-        // moving/resizing
         if (editRef.current) {
           const { nx, ny } = clientToNatural(e.clientX, e.clientY);
           const action = editRef.current;
@@ -264,61 +234,42 @@
 
           let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
           if (action.mode === 'move') {
-            const { nx: sx, ny: sy } = clientToNatural(action.startClientX, action.startClientY);
+            const { nx: sx, ny: sy } = clientToNatural(action.startX, action.startY);
             const dx = nx - sx, dy = ny - sy;
             nx1 = r0.x + dx;
             ny1 = r0.y + dy;
           } else if (action.mode === 'resize') {
-            const minSize = 8;
             const right = r0.x + r0.w;
             const bottom = r0.y + r0.h;
 
             if (action.handle === 'nw') {
-              nx1 = nx; nw = right - nx1;
-              ny1 = ny; nh = bottom - ny1;
+              nx1 = nx; ny1 = ny; nw = right - nx1; nh = bottom - ny1;
             } else if (action.handle === 'ne') {
-              nx1 = r0.x;
-              const newRight = nx;
-              nw = newRight - r0.x;
-              ny1 = ny; nh = bottom - ny1;
+              nx1 = r0.x; ny1 = ny; nw = nx - r0.x; nh = bottom - ny1;
             } else if (action.handle === 'sw') {
-              ny1 = r0.y;
-              const newBottom = ny;
-              nh = newBottom - r0.y;
-              nx1 = nx; nw = right - nx1;
+              nx1 = nx; ny1 = r0.y; nw = right - nx1; nh = ny - r0.y;
             } else if (action.handle === 'se') {
-              nx1 = r0.x;
-              ny1 = r0.y;
-              const newRight = nx;
-              const newBottom = ny;
-              nw = newRight - r0.x;
-              nh = newBottom - r0.y;
+              nx1 = r0.x; ny1 = r0.y; nw = nx - r0.x; nh = ny - r0.y;
             }
 
-            // normalize negative sizes by flipping anchor if needed
-            if (nw < 0) { nx1 = nx1 + nw; nw = Math.abs(nw); }
-            if (nh < 0) { ny1 = ny1 + nh; nh = Math.abs(nh); }
-
-            // enforce minimal size
-            nw = Math.max(nw, minSize);
-            nh = Math.max(nh, minSize);
+            if (nw < 0) { nx1 += nw; nw = Math.abs(nw); }
+            if (nh < 0) { ny1 += nh; nh = Math.abs(nh); }
           }
 
           const clamped = clampRectToImage({ x: nx1, y: ny1, w: nw, h: nh, imageIndex });
-          onUpdateRect(action.pairId, action.rectIndex /* absolute index in pair.rects */, clamped);
+          onUpdateRect(action.pairId, action.rectIndex, clamped);
         }
       };
 
       const finishDrawing = () => {
         if (!drag) return;
         const { startX, startY, curX, curY } = drag;
-        const box = ref.current.getBoundingClientRect();
+        const box = getBox();
         const x = Math.min(startX, curX);
         const y = Math.min(startY, curY);
         const w = Math.abs(curX - startX);
         const h = Math.abs(curY - startY);
-
-        if (w < 3 || h < 3) { setDrag(null); return; } // ignore tiny clicks
+        if (w < 3 || h < 3) { setDrag(null); return; }
 
         const nx = (x / box.width)  * imgDims.naturalW;
         const ny = (y / box.height) * imgDims.naturalH;
@@ -330,13 +281,41 @@
         setDrag(null);
       };
 
-      const onMouseUp = () => {
+      const onPointerUp = (e) => {
+        if (ref.current.hasPointerCapture?.(e.pointerId)) {
+          ref.current.releasePointerCapture(e.pointerId);
+        }
         if (drag) finishDrawing();
         if (editRef.current) editRef.current = null;
       };
-      const onMouseLeave = () => {
-        if (drag) finishDrawing();
-        if (editRef.current) editRef.current = null;
+
+      // MOVE start
+      const onRectPointerDown = (e, pairId, absIndex, rect) => {
+        e.stopPropagation();
+        ref.current.setPointerCapture(e.pointerId);
+        editRef.current = {
+          pairId,
+          rectIndex: absIndex,
+          mode: 'move',
+          startRect: { ...rect },
+          startX: e.clientX,
+          startY: e.clientY
+        };
+      };
+
+      // RESIZE start
+      const onHandlePointerDown = (e, pairId, absIndex, rect, handle) => {
+        e.stopPropagation();
+        ref.current.setPointerCapture(e.pointerId);
+        editRef.current = {
+          pairId,
+          rectIndex: absIndex,
+          mode: 'resize',
+          handle,
+          startRect: { ...rect },
+          startX: e.clientX,
+          startY: e.clientY
+        };
       };
 
       const toClient = (r) => {
@@ -347,88 +326,50 @@
         return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
       };
 
-      // MOVE mousedown on rect
-      const onRectMouseDown = (e, pairId, absIndex, rect) => {
-        e.stopPropagation();
-        e.preventDefault();
-        editRef.current = {
-          pairId,
-          rectIndex: absIndex,   // absolute index within pair.rects (keeps imageIndex!)
-          mode: 'move',
-          startRect: { ...rect },
-          startClientX: e.clientX,
-          startClientY: e.clientY
-        };
-      };
-
-      // RESIZE mousedown on corner handle
-      const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
-        e.stopPropagation();
-        e.preventDefault();
-        editRef.current = {
-          pairId,
-          rectIndex: absIndex,
-          mode: 'resize',
-          handle,
-          startRect: { ...rect },
-          startClientX: e.clientX,
-          startClientY: e.clientY
-        };
-      };
-
-      // Helper: iterate rects with absolute indices, then filter by this image
       const rectsForThisImage = (p) =>
-        p.rects
-          .map((r, absIndex) => ({ r, absIndex }))
-          .filter(({ r }) => r.imageIndex === imageIndex);
+        p.rects.map((r, absIndex) => ({ r, absIndex })).filter(({ r }) => r.imageIndex === imageIndex);
 
       return (
         <div
           ref={ref}
-          onMouseDown={onBackgroundMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUp}
-          onMouseLeave={onMouseLeave}
+          onPointerDown={onBackgroundPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
           className="relative w-full select-none bg-white rounded-xl no-select"
           title="Click-drag to draw a rectangle"
         >
-          <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
+          <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
-          {/* Existing rectangles */}
           {pairs.map((p) =>
-            rectsForThisImage(p).map(({ r, absIndex }) => {
-              return (
-                <div
-                  key={p.pairId + '-' + absIndex}
-                  className="absolute box-border anno-rect"
-                  style={{
-                    ...toClient(r),
-                    border: `3px solid ${p.color}`,
-                    borderRadius: 8,
-                    color: p.color,
-                    background: p.pairId === activePairId ? `${p.color}22` : "transparent",
-                  }}
-                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
-                >
-                  <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
-                    {p.label || "#" + p.pairId.slice(-3)}
-                  </div>
-
-                  {/* Handles */}
-                  <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
-                  <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
-                  <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
-                  <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
+            rectsForThisImage(p).map(({ r, absIndex }) => (
+              <div
+                key={p.pairId + '-' + absIndex}
+                className="absolute box-border anno-rect"
+                style={{
+                  ...toClient(r),
+                  border: `3px solid ${p.color}`,
+                  borderRadius: 8,
+                  color: p.color,
+                  background: p.pairId === activePairId ? `${p.color}22` : "transparent",
+                }}
+                onPointerDown={(e) => onRectPointerDown(e, p.pairId, absIndex, r)}
+              >
+                <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
+                  {p.label || "#" + p.pairId.slice(-3)}
                 </div>
-              );
-            })
+
+                <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
+                  onPointerDown={(e)=>onHandlePointerDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
+                  onPointerDown={(e)=>onHandlePointerDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
+                  onPointerDown={(e)=>onHandlePointerDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
+                  onPointerDown={(e)=>onHandlePointerDown(e, p.pairId, absIndex, r, 'se')}></div>
+              </div>
+            ))
           )}
 
-          {/* Live rubberband while drawing */}
           {drag && (
             <div
               className="absolute border-2 border-dashed pointer-events-none"
@@ -547,7 +488,7 @@
       );
     }
 
-    // Practice panel (full parity with main: draw + move + resize)
+    // Practice panel (same pair behavior as main)
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
@@ -558,28 +499,31 @@
         setPairs((arr) => [...arr, p]);
         setActivePairId(p.pairId);
       };
+
       const onFinishRect = (pairId, rect) => {
-        setPairs((prev) => prev.map((p) => {
-          if (p.pairId !== pairId) return p;
-          const nextRects = p.rects.length >= 2 ? p.rects : [...p.rects, rect];
-          return { ...p, rects: nextRects };
-        }));
-        // keep active until 2 rects exist; then clear
         setPairs((prev) => {
-          const target = prev.find((pp) => pp.pairId === pairId);
-          const len = target ? target.rects.length : 0;
-          if (len + 1 >= 2) setActivePairId(null);
-          return prev;
+          const next = prev.map((p) => {
+            if (p.pairId !== pairId) return p;
+            if (p.rects.length >= 2) return p; // enforce exactly two per pair
+            return { ...p, rects: [...p.rects, rect] };
+          });
+          const target = next.find((p) => p.pairId === pairId);
+          if (target?.rects.length >= 2) setActivePairId(null);
+          else setActivePairId(pairId);
+          return next;
         });
       };
+
       const onUpdateRect = (pairId, rectIndex, newRect) => {
         setPairs((prev) => prev.map((p) => {
           if (p.pairId !== pairId) return p;
-          const next = [...p.rects];
-          next[rectIndex] = newRect;
-          return { ...p, rects: next };
+          const nextRects = [...p.rects];
+          // preserve imageIndex (never move across images)
+          nextRects[rectIndex] = { ...newRect, imageIndex: nextRects[rectIndex]?.imageIndex ?? newRect.imageIndex };
+          return { ...p, rects: nextRects };
         }));
       };
+
       const reset = () => { setPairs([]); setActivePairId(null); };
 
       const setDef = { images: [
@@ -613,16 +557,13 @@
       );
     }
 
-    // Expanded, explicit instructions screen shown BEFORE rating
+    // Intro / Instructions screen shown before scenes
     function IntroScreen({ raterId, setRaterId, onStart, onClearAll }) {
       return (
         <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
-
           <InstructionsPanel />
-
           <PracticePanel />
-
           <div className="flex items-center gap-3 my-4">
             <label className="text-sm w-24">Rater ID</label>
             <input
@@ -635,7 +576,6 @@
               Randomize
             </button>
           </div>
-
           <div className="flex items-center justify-between">
             <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
             <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
@@ -692,10 +632,10 @@
       // phase: 'intro' | 'rate'
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
 
-      // show instructions (rating page) — default hidden
+      // show instructions on rating screen — default hidden
       const [showInstructions, setShowInstructions] = useState(false);
 
-      // rater id (auto-generate if missing)
+      // rater id
       const [raterId, setRaterId] = useState(() => {
         const saved = localStorage.getItem('mv3d_rater_id');
         return saved && saved.trim() ? saved : randomRaterId();
@@ -709,7 +649,7 @@
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // keyboard shortcuts — DO NOT fire when typing in inputs/textarea/contentEditable
+      // keyboard shortcuts — ignore when typing
       useEffect(() => {
         const h = (e) => {
           const tag = e.target && e.target.tagName;
@@ -831,9 +771,8 @@
         if (idx < 0) return;
         const p = setAnno.pairs[idx];
         const rects = [...p.rects];
-        // keep the original imageIndex; do not let edits move the rect to another image
-        const preserved = { ...newRect, imageIndex: rects[rectIndex]?.imageIndex ?? newRect.imageIndex };
-        rects[rectIndex] = preserved;
+        // preserve original imageIndex
+        rects[rectIndex] = { ...newRect, imageIndex: rects[rectIndex]?.imageIndex ?? newRect.imageIndex };
         const arr = [...setAnno.pairs];
         arr[idx] = { ...p, rects };
         updateSetAnno({ ...setAnno, pairs: arr });
@@ -860,6 +799,7 @@
 
       function isSetDone(aSetAnno) {
         return aSetAnno.noInconsistencies || aSetAnno.pairs.some((p) => p.rects.length === 2);
+        // (You can tighten this to require ALL pairs complete if desired.)
       }
 
       function canProceedScene() {
@@ -964,7 +904,6 @@
           />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
-            {/* Config load status */}
             {loadingConfig && (
               <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
                 Loading study config from URL…
@@ -990,7 +929,6 @@
               />
             ) : (
               <>
-                {/* Optional inline instructions on rating screen */}
                 {showInstructions && <InstructionsPanel />}
 
                 {/* Scene header & tabs */}
