@@ -16,7 +16,7 @@
       body { margin: 0; background: #fafafa; }
       button:focus { outline: 2px solid #000; outline-offset: 2px; }
       .anno-rect { cursor: move; }
-      .resize-handle { width: 10px; height: 10px; position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4); border-radius: 2px; background: currentColor; cursor: nwse-resize; }
+      .resize-handle { width: 10px; height: 10px; position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4); border-radius: 2px; background: currentColor; }
       .handle-nw, .handle-se { cursor: nwse-resize; }
       .handle-ne, .handle-sw { cursor: nesw-resize; }
     </style>
@@ -88,6 +88,27 @@
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
 
+    // --- Hidden labels for raters (UI only) ---
+    const HIDDEN_SET_LABELS = ["Set A", "Set B"];
+    const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
+
+    /**
+     * Returns a mapping: { [sceneId]: [perm0, perm1] } (a permutation of [0,1] per scene)
+     * Persisted in localStorage so refresh keeps the same randomization for the study.
+     */
+    function buildOrLoadUiOrder(study) {
+      try {
+        const existing = localStorage.getItem(ORDER_KEY(study.studyId));
+        if (existing) return JSON.parse(existing);
+      } catch {}
+      const map = {};
+      for (const sc of study.scenes) {
+        map[sc.sceneId] = Math.random() < 0.5 ? [0, 1] : [1, 0];
+      }
+      try { localStorage.setItem(ORDER_KEY(study.studyId), JSON.stringify(map)); } catch {}
+      return map;
+    }
+
     // Short random rater id (stable until cleared; editable by rater)
     const randomRaterId = () => {
       const a = Math.random().toString(36).slice(2, 6);
@@ -142,15 +163,13 @@
         return () => ro.disconnect();
       }, [src]);
 
-      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
       const clientToNatural = (cx, cy) => {
         const box = ref.current.getBoundingClientRect();
         const x = clamp(cx - box.left, 0, box.width);
         const y = clamp(cy - box.top, 0, box.height);
         const nx = (x / box.width)  * imgDims.naturalW;
         const ny = (y / box.height) * imgDims.naturalH;
-        return { nx, ny, boxW: box.width, boxH: box.height };
+        return { nx, ny };
       };
 
       // DRAWING on background
@@ -181,6 +200,7 @@
 
           let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
           if (action.mode === 'move') {
+            // movement delta based on start rect center
             const { nx: sx, ny: sy } = clientToNatural(action.startClientX, action.startClientY);
             const dx = nx - sx, dy = ny - sy;
             nx1 = clamp(r0.x + dx, 0, imgDims.naturalW - r0.w);
@@ -272,7 +292,6 @@
         };
       };
 
-      // Helper: iterate rects with absolute indices, then filter by image
       const rectsForThisImage = (p) =>
         p.rects
           .map((r, absIndex) => ({ r, absIndex }))
@@ -289,10 +308,9 @@
         >
           <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
-          {/* Existing rectangles (use ABSOLUTE index!) */}
           {pairs.map((p) =>
             rectsForThisImage(p).map(({ r, absIndex }) => {
-              const showHandles = true; // or p.pairId === activePairId
+              const showHandles = true;
               return (
                 <div
                   key={p.pairId + '-' + absIndex}
@@ -327,7 +345,6 @@
             })
           )}
 
-          {/* Live rubberband while drawing */}
           {drag && (
             <div
               className="absolute border-2 border-dashed pointer-events-none"
@@ -343,7 +360,6 @@
         </div>
       );
     }
-
 
     function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing, onUpdateRect }) {
       return (
@@ -459,8 +475,13 @@
         setActivePairId(p.pairId);
       };
       const onFinishRect = (pairId, rect) => {
+        // compute new length to know if we should keep active or clear
+        const target = pairs.find((p) => p.pairId === pairId);
+        const newLen = (target?.rects.length || 0) + 1;
+
         setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
-        setActivePairId(null);
+        if (newLen >= 2) setActivePairId(null);
+        else setActivePairId(pairId);
       };
       const onUpdateRect = (pairId, rectIndex, newRect) => {
         setPairs((prev) => prev.map((p) => {
@@ -497,7 +518,7 @@
             onUpdateRect={onUpdateRect}
           />
           <div className="text-xs text-neutral-600 mt-2">
-            Tip: click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
+            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
           </div>
         </div>
       );
@@ -605,6 +626,9 @@
         return saved && saved.trim() ? saved : randomRaterId();
       });
 
+      // per-scene randomized UI order mapping
+      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
+
       // persist annos and rater id, phase
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
@@ -657,8 +681,8 @@
       }, []);
 
       const currentScene = study.scenes[sceneIdx];
-      const [defA, defB] = currentScene.sets;
-      const setDef = setTab === 0 ? defA : defB;
+      const order = uiOrder[currentScene.sceneId] || [0, 1]; // randomized mapping of [0,1]
+      const setDef = currentScene.sets[order[setTab]];       // pick the actual set by randomized order
       const sceneAnno = annos[currentScene.sceneId];
       const setAnno = sceneAnno.sets[setDef.setId];
 
@@ -745,16 +769,20 @@
           setSceneIdx(0);
           setSetTab(0);
           setActivePairId(null);
+          setUiOrder(buildOrLoadUiOrder(json)); // NEW: rebuild randomization for imported study
         } else if (json && json.studyId && typeof json === "object") {
           if (json.annos) setAnnos(json.annos);
-          if (json.study) setStudy(json.study);
+          if (json.study) {
+            setStudy(json.study);
+            setUiOrder(buildOrLoadUiOrder(json.study));
+          }
         } else {
           alert("Unrecognized JSON format.");
         }
       }
 
       function onExport() {
-        const payload = { study, annos, exportedAt: new Date().toISOString() };
+        const payload = { study, annos, exportedAt: new Date().toISOString(), uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS };
         download(`${study.studyId}__results.json`, pretty(payload));
       }
 
@@ -793,7 +821,13 @@
           const fd = new FormData();
           fd.append('raterId', raterId);
           fd.append('studyId', study.studyId);
-          fd.append('payload', JSON.stringify({ study, annos, exportedAt: new Date().toISOString() }));
+          fd.append('payload', JSON.stringify({
+            study,
+            annos,
+            exportedAt: new Date().toISOString(),
+            uiOrderByScene: uiOrder,
+            hiddenSetLabels: HIDDEN_SET_LABELS
+          }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
           alert('Submitted! Check the Google Sheet for the new row.');
         } catch (err) {
@@ -808,6 +842,7 @@
           localStorage.removeItem('mv3d_rater_id');
           localStorage.removeItem('mv3d_phase');
           localStorage.removeItem(LS_KEY(study.studyId));
+          localStorage.removeItem(ORDER_KEY(study.studyId));
         } catch {}
         setRaterId(randomRaterId());
         setAnnos(loadInitialAnnos(study));
@@ -815,6 +850,7 @@
         setSetTab(0);
         setActivePairId(null);
         setPhase('intro');
+        setUiOrder(buildOrLoadUiOrder(study));
         alert('Cleared. You can start fresh.');
       }
 
@@ -873,7 +909,7 @@
                     Scene {sceneIdx + 1}: {currentScene.title}
                   </div>
                   <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-                    {study.setNames.map((name, i) => (
+                    {HIDDEN_SET_LABELS.map((name, i) => (
                       <button key={i}
                         className={`px-3 py-1.5 rounded-lg text-sm ${setTab === i ? "bg-white shadow border" : "text-neutral-600"}`}
                         onClick={() => setSetTab(i)}>
