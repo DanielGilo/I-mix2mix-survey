@@ -28,7 +28,7 @@
     <div id="root"></div>
 
     <!-- The entire app -->
-    <script type="text/babel" data-presets="react,env">
+    <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useRef, useState } = React;
 
     // ======= CONFIG =======
@@ -38,8 +38,7 @@
     // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
-      instructions:
-        "Mark paired rectangles where multi-view images disagree in 3D.",
+      instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
       setNames: ["DGE", "I-M2M"],
       scenes: [
         {
@@ -152,9 +151,15 @@
           });
         }
         update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
+
+        if (typeof ResizeObserver !== "undefined") {
+          const ro = new ResizeObserver(update);
+          ro.observe(el);
+          return () => ro.disconnect();
+        } else {
+          window.addEventListener("resize", update);
+          return () => window.removeEventListener("resize", update);
+        }
       }, [src]);
 
       const clientToNatural = (cx, cy) => {
@@ -171,7 +176,7 @@
         // ignore clicks that start inside existing rects/handles
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
-        onStartDrawing?.();
+        if (onStartDrawing) onStartDrawing();
 
         const box = ref.current.getBoundingClientRect();
         const x = clamp(e.clientX - box.left, 0, box.width);
@@ -234,7 +239,7 @@
           nh  = clamp(nh,  1, imgDims.naturalH - ny1);
 
           const newRect = { x: nx1, y: ny1, w: nw, h: nh, imageIndex };
-          onUpdateRect(action.pairId, action.rectIndex, newRect);
+          if (onUpdateRect) onUpdateRect(action.pairId, action.rectIndex, newRect);
         }
       };
 
@@ -258,7 +263,7 @@
           const nwC = clamp(nw, 1, imgDims.naturalW - nxC);
           const nhC = clamp(nh, 1, imgDims.naturalH - nyC);
 
-          onFinishRect?.(activePairId, { x: nxC, y: nyC, w: nwC, h: nhC, imageIndex });
+          if (onFinishRect) onFinishRect(activePairId, { x: nxC, y: nyC, w: nwC, h: nhC, imageIndex });
           setDrag(null);
         }
         if (editRef.current) editRef.current = null;
