@@ -510,35 +510,62 @@
       );
     }
 
-    // Expanded, explicit instructions text
+        // Expanded, explicit instructions text
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            You will see <b>two sets of four images</b> per scene. Each set contains <b>the same moment</b> in time
+            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time</b>
             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
-            <b> inconsistencies between views within a set</b>.
+            <b> inconsistencies between images within the same set</b>.
           </p>
+
           <ul className="list-disc ml-5 space-y-1">
-            <li><b>Ignore preference and image quality.</b> Do not rate which image looks nicer or sharper.</li>
-            <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, lighting consistency, etc.</li>
-            <li>Examples: the nose looks pointy in one view but rounded in another; eye color differs; logos/prints/texture change across views.</li>
-            <li>Subtle issues matter (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
-            <li>It is also possible that the set is consistent. If no inconsistencies found, mark <b>“No inconsistencies”</b> for that set.</li>
+            <li>
+              <b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.
+            </li>
+            <li>
+              Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.
+            </li>
+            <li>
+              Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs;
+              logos/prints/texture change across views.
+            </li>
+            <li>
+              Please <b>mark all inconsistencies you can find</b> in each set.
+            </li>
+            <li>
+              Some sets may seem consistent at first glance but contain subtle issues on closer inspection.
+            </li>
+            <li>
+              Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes).
+              Subtle issues matter (e.g., <i>fabric texture</i> alignment) — please mark them too.
+            </li>
+            <li>
+              <b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b> to
+              look for inconsistencies. If none are found, mark <b>“No inconsistencies”</b> for that set.
+            </li>
           </ul>
+
           <p>
-            To annotate, click <b>New pair (N)</b>, draw a rectangle on one view over the region of inconsistency,
-            then draw the matching rectangle on the corresponding view. Add as many pairs as needed.
+            An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing —
+            covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view over
+            the inconsistent region, then draw the matching rectangle on the corresponding view. Add as many pairs as
+            needed.
           </p>
+
           {INTRO_VIDEO_URL && (
             <div className="mt-2">
               <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
-              <div className="text-xs text-neutral-500 mt-1">The video shows an example of how to mark inconsistencies between two views.</div>
+              <div className="text-xs text-neutral-500 mt-1">
+                The video shows an example of how to mark inconsistencies between two views.
+              </div>
             </div>
           )}
         </div>
       );
     }
+
 
     // Intro / Instructions screen shown before scenes
     function IntroScreen({ raterId, setRaterId, onStart, onClearAll }) {
