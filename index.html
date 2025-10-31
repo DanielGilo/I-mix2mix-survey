@@ -16,9 +16,13 @@
       body { margin: 0; background: #fafafa; }
       button:focus { outline: 2px solid #000; outline-offset: 2px; }
       .anno-rect { cursor: move; }
-      .resize-handle { width: 10px; height: 10px; position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4); border-radius: 2px; background: currentColor; }
+      .resize-handle {
+        width: 10px; height: 10px; position: absolute; border: 2px solid #fff;
+        box-shadow: 0 0 0 1px rgba(0,0,0,.4); border-radius: 2px; background: currentColor;
+      }
       .handle-nw, .handle-se { cursor: nwse-resize; }
       .handle-ne, .handle-sw { cursor: nesw-resize; }
+      .no-select { user-select: none; -webkit-user-select:none; -ms-user-select:none; }
     </style>
   </head>
   <body>
@@ -29,14 +33,17 @@
     const { useEffect, useMemo, useRef, useState } = React;
 
     // ======= CONFIG =======
+    // Optional: add a video URL to show on the Instruction screen (mp4/webm hosted anywhere, incl. GitHub)
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
+
+    // Google Sheets endpoint (Apps Script web app URL)
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
     // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions:
-        "Mark pairs of rectangles highlighting where multi-view images disagree in 3D (shape, pose, identity, lighting-consistency artifacts, etc.). Each pair should link two corresponding regions across two views.",
+        "Mark paired rectangles highlighting where multi-view images disagree in 3D (shape, pose, identity, lighting-consistency artifacts, etc.). Each pair should link two corresponding regions across two views.",
       setNames: ["Baseline", "Your Method"],
       scenes: [
         {
@@ -85,9 +92,10 @@
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
 
-    // --- Hidden labels for raters (UI only) + randomized order per scene ---
+    // --- Hidden labels for raters (UI only) ---
     const HIDDEN_SET_LABELS = ["Set A", "Set B"];
     const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
+
     function buildOrLoadUiOrder(study) {
       try {
         const existing = localStorage.getItem(ORDER_KEY(study.studyId));
@@ -101,14 +109,12 @@
       return map;
     }
 
-    // Short random rater id (stable until cleared; editable by rater)
     const randomRaterId = () => {
       const a = Math.random().toString(36).slice(2, 6);
       const b = String(Math.floor(Math.random() * 100)).padStart(2, "0");
       return `r-${a}-${b}`;
     };
 
-    // URL config loader (for ?config=https://…/study.json)
     function getConfigParam() {
       try {
         const sp = new URLSearchParams(window.location.search);
@@ -127,13 +133,13 @@
       el.remove();
     }
 
-    // ===== Instructions (updated text you provided) =====
+    // ======= Instructions Panel (updated text) =======
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
             You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time</b>
-             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
+            captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
             <b> inconsistencies between images within the same set</b>.
           </p>
 
@@ -183,89 +189,74 @@
       );
     }
 
-    // ======= ImageBox with draw + move + resize (robust mapping & clamping) =======
+    // ======= ImageBox with draw + drag + resize (bug-fixed & clamped) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = useRef(null);
-      const imgRef = useRef(null);
-
-      // live draw rubber-band in client coords
-      const [drag, setDrag] = useState(null); // { startX, startY, curX, curY }
-
-      // displayed image geometry (handles object-contain letterboxing)
-      const [dims, setDims] = useState({
-        naturalW: 1, naturalH: 1,
-        boxW: 1, boxH: 1,
-        scale: 1, offX: 0, offY: 0, dispW: 1, dispH: 1,
-      });
+      const [drag, setDrag] = useState(null); // drawing: {startX,startY,curX,curY}
+      const [imgDims, setImgDims] = useState({ naturalW: 1, naturalH: 1, clientW: 1, clientH: 1 });
 
       // edit state for move/resize
-      const editRef = useRef(null); // { pairId, rectIndex(abs), mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
-
-      const MIN = 6; // min size in natural px
-
-      // compute displayed image rect & scale
-      const recompute = () => {
-        const box = ref.current?.getBoundingClientRect();
-        const img = imgRef.current;
-        if (!box || !img) return;
-        const nW = img.naturalWidth || 1;
-        const nH = img.naturalHeight || 1;
-        const bW = box.width || 1;
-        const bH = box.height || 1;
-        const scale = Math.min(bW / nW, bH / nH);
-        const dispW = nW * scale;
-        const dispH = nH * scale;
-        const offX = (bW - dispW) / 2;
-        const offY = (bH - dispH) / 2;
-        setDims({ naturalW: nW, naturalH: nH, boxW: bW, boxH: bH, scale, offX, offY, dispW, dispH });
-      };
+      const editRef = useRef(null); // { pairId, rectIndex, mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
 
       useEffect(() => {
-        recompute();
-        const ro = new ResizeObserver(recompute);
-        if (ref.current) ro.observe(ref.current);
-        const img = imgRef.current;
-        if (img) img.addEventListener('load', recompute);
-        return () => {
-          ro.disconnect();
-          if (img) img.removeEventListener('load', recompute);
-        };
+        const el = ref.current;
+        if (!el) return;
+        const img = el.querySelector("img");
+        function update() {
+          if (!img) return;
+          setImgDims({
+            naturalW: img.naturalWidth || 1,
+            naturalH: img.naturalHeight || 1,
+            clientW: img.clientWidth || 1,
+            clientH: img.clientHeight || 1,
+          });
+        }
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
       }, [src]);
 
-      // client -> natural (clamped inside displayed image area)
-      const clientToNatural = (clientX, clientY) => {
-        const box = ref.current?.getBoundingClientRect();
-        if (!box) return { nx: 0, ny: 0 };
-        const x = clamp(clientX - box.left - dims.offX, 0, dims.dispW);
-        const y = clamp(clientY - box.top  - dims.offY, 0, dims.dispH);
-        return { nx: x / dims.scale, ny: y / dims.scale };
+      const clientToNatural = (cx, cy) => {
+        const box = ref.current.getBoundingClientRect();
+        const x = clamp(cx - box.left, 0, box.width);
+        const y = clamp(cy - box.top, 0, box.height);
+        const nx = (x / box.width)  * imgDims.naturalW;
+        const ny = (y / box.height) * imgDims.naturalH;
+        return { nx, ny, boxW: box.width, boxH: box.height };
       };
 
-      // natural rect -> absolute client styles
-      const naturalToClientStyle = (r) => {
-        const x = clamp(r.x, 0, dims.naturalW - MIN);
-        const y = clamp(r.y, 0, dims.naturalH - MIN);
-        const w = clamp(r.w, MIN, dims.naturalW - x);
-        const h = clamp(r.h, MIN, dims.naturalH - y);
-        return {
-          left: dims.offX + x * dims.scale,
-          top:  dims.offY + y * dims.scale,
-          width:  w * dims.scale,
-          height: h * dims.scale,
-          position: 'absolute',
-        };
+      const clampRectToImage = (r) => {
+        const minSize = 8;
+        let x = clamp(r.x, 0, imgDims.naturalW - minSize);
+        let y = clamp(r.y, 0, imgDims.naturalH - minSize);
+        let w = clamp(r.w, minSize, imgDims.naturalW - x);
+        let h = clamp(r.h, minSize, imgDims.naturalH - y);
+        return { ...r, x, y, w, h };
       };
 
-      // ===== Drawing on background =====
+      // DRAWING on background
       const onBackgroundMouseDown = (e) => {
+        // ignore if starting on an existing rect or handle
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
         onStartDrawing?.();
-        setDrag({ startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY });
+
+        const box = ref.current.getBoundingClientRect();
+        const x = clamp(e.clientX - box.left, 0, box.width);
+        const y = clamp(e.clientY - box.top, 0, box.height);
+        setDrag({ startX: x, startY: y, curX: x, curY: y });
       };
+
       const onMouseMove = (e) => {
-        if (drag) setDrag((d) => ({ ...d, curX: e.clientX, curY: e.clientY }));
-        // moving / resizing existing
+        // drawing rubber-band
+        if (drag) {
+          const box = ref.current.getBoundingClientRect();
+          const x = clamp(e.clientX - box.left, 0, box.width);
+          const y = clamp(e.clientY - box.top, 0, box.height);
+          setDrag((d) => ({ ...d, curX: x, curY: y }));
+        }
+        // moving/resizing
         if (editRef.current) {
           const { nx, ny } = clientToNatural(e.clientX, e.clientY);
           const action = editRef.current;
@@ -275,70 +266,105 @@
           if (action.mode === 'move') {
             const { nx: sx, ny: sy } = clientToNatural(action.startClientX, action.startClientY);
             const dx = nx - sx, dy = ny - sy;
-            nx1 = clamp(r0.x + dx, 0, dims.naturalW - r0.w);
-            ny1 = clamp(r0.y + dy, 0, dims.naturalH - r0.h);
+            nx1 = r0.x + dx;
+            ny1 = r0.y + dy;
           } else if (action.mode === 'resize') {
-            const minSize = MIN;
+            const minSize = 8;
             const right = r0.x + r0.w;
             const bottom = r0.y + r0.h;
 
             if (action.handle === 'nw') {
-              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
-              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+              nx1 = nx; nw = right - nx1;
+              ny1 = ny; nh = bottom - ny1;
             } else if (action.handle === 'ne') {
               nx1 = r0.x;
-              const newRight = clamp(nx, r0.x + minSize, dims.naturalW);
+              const newRight = nx;
               nw = newRight - r0.x;
-              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+              ny1 = ny; nh = bottom - ny1;
             } else if (action.handle === 'sw') {
               ny1 = r0.y;
-              const newBottom = clamp(ny, r0.y + minSize, dims.naturalH);
+              const newBottom = ny;
               nh = newBottom - r0.y;
-              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
+              nx1 = nx; nw = right - nx1;
             } else if (action.handle === 'se') {
               nx1 = r0.x;
               ny1 = r0.y;
-              const newRight = clamp(nx, r0.x + minSize, dims.naturalW);
-              const newBottom = clamp(ny, r0.y + minSize, dims.naturalH);
+              const newRight = nx;
+              const newBottom = ny;
               nw = newRight - r0.x;
               nh = newBottom - r0.y;
             }
+
+            // normalize negative sizes by flipping anchor if needed
+            if (nw < 0) { nx1 = nx1 + nw; nw = Math.abs(nw); }
+            if (nh < 0) { ny1 = ny1 + nh; nh = Math.abs(nh); }
+
+            // enforce minimal size
+            nw = Math.max(nw, minSize);
+            nh = Math.max(nh, minSize);
           }
-          const newRect = { x: nx1, y: ny1, w: nw, h: nh, imageIndex };
-          onUpdateRect(action.pairId, action.rectIndex /* absolute index in pair.rects */, newRect);
+
+          const clamped = clampRectToImage({ x: nx1, y: ny1, w: nw, h: nh, imageIndex });
+          onUpdateRect(action.pairId, action.rectIndex /* absolute index in pair.rects */, clamped);
         }
       };
-      const finishDrag = () => {
-        if (drag) {
-          const { startX, startY, curX, curY } = drag;
-          const { nx: ax, ny: ay } = clientToNatural(startX, startY);
-          const { nx: bx, ny: by } = clientToNatural(curX, curY);
-          const x = Math.min(ax, bx);
-          const y = Math.min(ay, by);
-          const w = Math.max(MIN, Math.abs(bx - ax));
-          const h = Math.max(MIN, Math.abs(by - ay));
-          const xCl = clamp(x, 0, dims.naturalW - w);
-          const yCl = clamp(y, 0, dims.naturalH - h);
-          onFinishRect?.(activePairId, { x: xCl, y: yCl, w, h, imageIndex });
-          setDrag(null);
-        }
+
+      const finishDrawing = () => {
+        if (!drag) return;
+        const { startX, startY, curX, curY } = drag;
+        const box = ref.current.getBoundingClientRect();
+        const x = Math.min(startX, curX);
+        const y = Math.min(startY, curY);
+        const w = Math.abs(curX - startX);
+        const h = Math.abs(curY - startY);
+
+        if (w < 3 || h < 3) { setDrag(null); return; } // ignore tiny clicks
+
+        const nx = (x / box.width)  * imgDims.naturalW;
+        const ny = (y / box.height) * imgDims.naturalH;
+        const nw = (w / box.width)  * imgDims.naturalW;
+        const nh = (h / box.height) * imgDims.naturalH;
+
+        const clamped = clampRectToImage({ x: nx, y: ny, w: nw, h: nh, imageIndex });
+        onFinishRect?.(activePairId, clamped);
+        setDrag(null);
+      };
+
+      const onMouseUp = () => {
+        if (drag) finishDrawing();
+        if (editRef.current) editRef.current = null;
+      };
+      const onMouseLeave = () => {
+        if (drag) finishDrawing();
         if (editRef.current) editRef.current = null;
       };
 
-      // ===== Move/Resize handlers =====
+      const toClient = (r) => {
+        const bx = r.x / imgDims.naturalW;
+        const by = r.y / imgDims.naturalH;
+        const bw = r.w / imgDims.naturalW;
+        const bh = r.h / imgDims.naturalH;
+        return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
+      };
+
+      // MOVE mousedown on rect
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
+        e.preventDefault();
         editRef.current = {
           pairId,
-          rectIndex: absIndex,
+          rectIndex: absIndex,   // absolute index within pair.rects (keeps imageIndex!)
           mode: 'move',
           startRect: { ...rect },
           startClientX: e.clientX,
-          startClientY: e.clientY,
+          startClientY: e.clientY
         };
       };
+
+      // RESIZE mousedown on corner handle
       const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
         e.stopPropagation();
+        e.preventDefault();
         editRef.current = {
           pairId,
           rectIndex: absIndex,
@@ -346,11 +372,11 @@
           handle,
           startRect: { ...rect },
           startClientX: e.clientX,
-          startClientY: e.clientY,
+          startClientY: e.clientY
         };
       };
 
-      // Helper: enumerate rects with absolute indices per pair, then filter to this image
+      // Helper: iterate rects with absolute indices, then filter by this image
       const rectsForThisImage = (p) =>
         p.rects
           .map((r, absIndex) => ({ r, absIndex }))
@@ -361,24 +387,22 @@
           ref={ref}
           onMouseDown={onBackgroundMouseDown}
           onMouseMove={onMouseMove}
-          onMouseUp={finishDrag}
-          onMouseLeave={finishDrag}
-          className="relative w-full h-full select-none bg-white rounded-xl overflow-hidden"
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseLeave}
+          className="relative w-full select-none bg-white rounded-xl no-select"
           title="Click-drag to draw a rectangle"
         >
-          <img ref={imgRef} src={src} alt="view" className="w-full h-full object-contain pointer-events-none" draggable={false} />
+          <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
-          {/* Existing rectangles (absolute indices preserved) */}
+          {/* Existing rectangles */}
           {pairs.map((p) =>
             rectsForThisImage(p).map(({ r, absIndex }) => {
-              const showHandles = true; // always show; could gate by activePairId
-              const style = naturalToClientStyle(r);
               return (
                 <div
                   key={p.pairId + '-' + absIndex}
                   className="absolute box-border anno-rect"
                   style={{
-                    ...style,
+                    ...toClient(r),
                     border: `3px solid ${p.color}`,
                     borderRadius: 8,
                     color: p.color,
@@ -390,46 +414,42 @@
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
 
-                  {showHandles && (
-                    <>
-                      <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
-                      <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
-                      <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
-                      <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
-                    </>
-                  )}
+                  {/* Handles */}
+                  <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                  <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                  <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                  <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
                 </div>
               );
             })
           )}
 
-          {/* Live rubberband */}
-          {drag && (() => {
-            const { nx: ax, ny: ay } = clientToNatural(drag.startX, drag.startY);
-            const { nx: bx, ny: by } = clientToNatural(drag.curX, drag.curY);
-            const x = Math.min(ax, bx), y = Math.min(ay, by);
-            const w = Math.abs(bx - ax), h = Math.abs(by - ay);
-            const st = naturalToClientStyle({ x, y, w: Math.max(MIN,w), h: Math.max(MIN,h) });
-            return (
-              <div
-                className="absolute border-2 border-dashed pointer-events-none"
-                style={{ left: st.left, top: st.top, width: st.width, height: st.height, borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000" }}
-              />
-            );
-          })()}
+          {/* Live rubberband while drawing */}
+          {drag && (
+            <div
+              className="absolute border-2 border-dashed pointer-events-none"
+              style={{
+                left: Math.min(drag.startX, drag.curX),
+                top: Math.min(drag.startY, drag.curY),
+                width: Math.abs(drag.curX - drag.startX),
+                height: Math.abs(drag.curY - drag.startY),
+                borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000",
+              }}
+            />
+          )}
         </div>
       );
     }
 
     function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing, onUpdateRect }) {
       return (
-        <div className="grid grid-cols-2 gap-3 w-full h-[72vh]">
+        <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
-            <div key={idx} className="aspect-[4/3]">
+            <div key={idx}>
               <ImageBox
                 src={src}
                 imageIndex={idx}
@@ -527,8 +547,108 @@
       );
     }
 
-    // ======= Header (minimal: only Rater ID + Submit) =======
-    function HeaderBar({ study, progressText, raterId, setRaterId, onSubmit, submitEnabled }) {
+    // Practice panel (full parity with main: draw + move + resize)
+    function PracticePanel() {
+      const [pairs, setPairs] = useState([]);
+      const [activePairId, setActivePairId] = useState(null);
+
+      const newPair = () => {
+        const color = COLORS[pairs.length % COLORS.length];
+        const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
+        setPairs((arr) => [...arr, p]);
+        setActivePairId(p.pairId);
+      };
+      const onFinishRect = (pairId, rect) => {
+        setPairs((prev) => prev.map((p) => {
+          if (p.pairId !== pairId) return p;
+          const nextRects = p.rects.length >= 2 ? p.rects : [...p.rects, rect];
+          return { ...p, rects: nextRects };
+        }));
+        // keep active until 2 rects exist; then clear
+        setPairs((prev) => {
+          const target = prev.find((pp) => pp.pairId === pairId);
+          const len = target ? target.rects.length : 0;
+          if (len + 1 >= 2) setActivePairId(null);
+          return prev;
+        });
+      };
+      const onUpdateRect = (pairId, rectIndex, newRect) => {
+        setPairs((prev) => prev.map((p) => {
+          if (p.pairId !== pairId) return p;
+          const next = [...p.rects];
+          next[rectIndex] = newRect;
+          return { ...p, rects: next };
+        }));
+      };
+      const reset = () => { setPairs([]); setActivePairId(null); };
+
+      const setDef = { images: [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
+      ]};
+
+      return (
+        <div className="border rounded-xl p-3 bg-white">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold">Practice area (try it here)</div>
+            <div className="flex gap-2">
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={newPair}>New pair</button>
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
+            </div>
+          </div>
+          <SetViewer
+            setDef={setDef}
+            anno={{ pairs }}
+            activePairId={activePairId}
+            onFinishRect={onFinishRect}
+            onStartDrawing={() => { if (!activePairId) newPair(); }}
+            onUpdateRect={onUpdateRect}
+          />
+          <div className="text-xs text-neutral-600 mt-2">
+            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
+          </div>
+        </div>
+      );
+    }
+
+    // Expanded, explicit instructions screen shown BEFORE rating
+    function IntroScreen({ raterId, setRaterId, onStart, onClearAll }) {
+      return (
+        <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
+          <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
+
+          <InstructionsPanel />
+
+          <PracticePanel />
+
+          <div className="flex items-center gap-3 my-4">
+            <label className="text-sm w-24">Rater ID</label>
+            <input
+              className="flex-1 text-sm px-3 py-2 rounded-md border"
+              placeholder="e.g., r-8f4k-27"
+              value={raterId}
+              onChange={(e) => setRaterId(e.target.value)}
+            />
+            <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())}>
+              Randomize
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
+            <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
+                    disabled={!raterId} onClick={onStart}>
+              Start rating ▶
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Header
+    function HeaderBar({ study, progressText, raterId, setRaterId, onSubmit, onClearAll, onToggleInstructions, showInstructions, canSubmit }) {
       return (
         <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
@@ -540,11 +660,15 @@
             <div className="flex items-center gap-2">
               <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
                     value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onToggleInstructions}>
+                {showInstructions ? "Hide instructions" : "Show instructions"}
+              </button>
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
               <button
-                className={`text-sm px-3 py-1.5 rounded-md border ${(!submitEnabled) ? "opacity-50" : "bg-black text-white"}`}
-                disabled={!submitEnabled}
+                className={`text-sm px-3 py-1.5 rounded-md border ${(!canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
+                disabled={!canSubmit || ENDPOINT.includes("PASTE_")}
                 onClick={onSubmit}
-                title={!submitEnabled ? "Finish all sets in all scenes and enter Rater ID" : "Submit to Google Sheet"}
+                title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}
               >
                 Submit
               </button>
@@ -567,7 +691,8 @@
 
       // phase: 'intro' | 'rate'
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
-      // instructions toggle (default hidden in 'rate')
+
+      // show instructions (rating page) — default hidden
       const [showInstructions, setShowInstructions] = useState(false);
 
       // rater id (auto-generate if missing)
@@ -579,12 +704,12 @@
       // per-scene randomized UI order mapping
       const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
 
-      // persist annos and rater id, phase
+      // persist annos / rater id / phase
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // keyboard shortcuts — DO NOT fire when typing
+      // keyboard shortcuts — DO NOT fire when typing in inputs/textarea/contentEditable
       useEffect(() => {
         const h = (e) => {
           const tag = e.target && e.target.tagName;
@@ -631,8 +756,8 @@
       }, []);
 
       const currentScene = study.scenes[sceneIdx];
-      const order = uiOrder[currentScene.sceneId] || [0, 1]; // randomized mapping of [0,1]
-      const setDef = currentScene.sets[order[setTab]];       // pick the actual set by randomized order
+      const order = uiOrder[currentScene.sceneId] || [0, 1];
+      const setDef = currentScene.sets[order[setTab]];
       const sceneAnno = annos[currentScene.sceneId];
       const setAnno = sceneAnno.sets[setDef.setId];
 
@@ -706,7 +831,9 @@
         if (idx < 0) return;
         const p = setAnno.pairs[idx];
         const rects = [...p.rects];
-        rects[rectIndex] = newRect;
+        // keep the original imageIndex; do not let edits move the rect to another image
+        const preserved = { ...newRect, imageIndex: rects[rectIndex]?.imageIndex ?? newRect.imageIndex };
+        rects[rectIndex] = preserved;
         const arr = [...setAnno.pairs];
         arr[idx] = { ...p, rects };
         updateSetAnno({ ...setAnno, pairs: arr });
@@ -731,16 +858,27 @@
         }
       }
 
-      function sceneComplete(sc) {
-        const a = annos[sc.sceneId];
-        if (!a) return false;
-        const [s0, s1] = sc.sets;
-        const ok = (sa) => sa.noInconsistencies || sa.pairs.some((p) => p.rects.length === 2);
-        return ok(a.sets[s0.setId]) && ok(a.sets[s1.setId]);
+      function isSetDone(aSetAnno) {
+        return aSetAnno.noInconsistencies || aSetAnno.pairs.some((p) => p.rects.length === 2);
       }
 
-      function allScenesComplete() {
-        return study.scenes.every(sceneComplete);
+      function canProceedScene() {
+        const [s0, s1] = currentScene.sets;
+        const a0 = annos[currentScene.sceneId].sets[s0.setId];
+        const a1 = annos[currentScene.sceneId].sets[s1.setId];
+        return isSetDone(a0) && isSetDone(a1);
+      }
+
+      function isStudyComplete() {
+        for (const sc of study.scenes) {
+          const setsMap = annos[sc.sceneId]?.sets;
+          if (!setsMap) return false;
+          for (const s of sc.sets) {
+            const a = setsMap[s.setId];
+            if (!a || !isSetDone(a)) return false;
+          }
+        }
+        return true;
       }
 
       function gotoNextScene() {
@@ -749,7 +887,7 @@
           setSetTab(0);
           setActivePairId(null);
         } else {
-          alert("You’ve reached the last scene. When finished, please press the Submit button in the upper-right corner.");
+          alert("You’ve reached the last scene. If everything looks good, please press the Submit button (top-right).");
         }
       }
       function gotoPrevScene() {
@@ -763,12 +901,9 @@
       async function submitToServer() {
         try {
           if (!raterId) { alert('Please enter your Rater ID.'); return; }
+          if (!isStudyComplete()) { alert('Please complete all scenes (both sets) before submitting.'); return; }
           if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
             alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
-            return;
-          }
-          if (!allScenesComplete()) {
-            alert('Please finish rating all sets in all scenes before submitting.');
             return;
           }
           const fd = new FormData();
@@ -789,11 +924,30 @@
         }
       }
 
+      function clearAllData() {
+        if (!confirm('This will clear your rater ID and ALL saved annotations for this study on this device. Continue?')) return;
+        try {
+          localStorage.removeItem('mv3d_rater_id');
+          localStorage.removeItem('mv3d_phase');
+          localStorage.removeItem(LS_KEY(study.studyId));
+          localStorage.removeItem(ORDER_KEY(study.studyId));
+        } catch {}
+        setRaterId(randomRaterId());
+        setAnnos(loadInitialAnnos(study));
+        setSceneIdx(0);
+        setSetTab(0);
+        setActivePairId(null);
+        setPhase('intro');
+        setUiOrder(buildOrLoadUiOrder(study));
+        setShowInstructions(false);
+        alert('Cleared. You can start fresh.');
+      }
+
       const progressText = phase === 'rate'
         ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
         : `Instructions`;
 
-      const submitEnabled = !!raterId && !ENDPOINT.includes("PASTE_") && allScenesComplete();
+      const canSubmit = isStudyComplete() && !!raterId;
 
       return (
         <div className="min-h-screen bg-neutral-50 text-neutral-900">
@@ -803,7 +957,10 @@
             raterId={raterId}
             setRaterId={setRaterId}
             onSubmit={submitToServer}
-            submitEnabled={submitEnabled}
+            onClearAll={clearAllData}
+            onToggleInstructions={() => setShowInstructions((v)=>!v)}
+            showInstructions={showInstructions}
+            canSubmit={canSubmit}
           />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
@@ -828,21 +985,12 @@
               <IntroScreen
                 raterId={raterId}
                 setRaterId={setRaterId}
-                onStart={() => { setPhase('rate'); setShowInstructions(false); }}
+                onStart={() => setPhase('rate')}
                 onClearAll={clearAllData}
               />
             ) : (
               <>
-                {/* Single toggle (default hidden) */}
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-sm font-medium">Guidance</div>
-                  <button
-                    className="text-xs px-2 py-1 rounded-md border"
-                    onClick={() => setShowInstructions((v) => !v)}
-                  >
-                    {showInstructions ? "Hide instructions" : "Show instructions"}
-                  </button>
-                </div>
+                {/* Optional inline instructions on rating screen */}
                 {showInstructions && <InstructionsPanel />}
 
                 {/* Scene header & tabs */}
@@ -881,7 +1029,7 @@
                     onLabelPair={labelPair}
                     activePairId={activePairId}
                     setActivePairId={setActivePairId}
-                    canFinishScene={sceneComplete(currentScene)}
+                    canFinishScene={canProceedScene()}
                     onNextScene={gotoNextScene}
                     onPrevScene={gotoPrevScene}
                   />
@@ -889,114 +1037,12 @@
 
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs text-neutral-500">Autosaved locally under <code>{LS_KEY(study.studyId)}</code></div>
-                  <div className="flex gap-2">
-                    <button className="px-3 py-2 rounded-lg border" onClick={() => setSetTab((t) => (t === 0 ? 1 : 0))}>
-                      Switch set (Tab)
-                    </button>
+                  <div className="text-xs text-neutral-500">
+                    {isStudyComplete() ? "All scenes completed ✓ — you can submit." : "Complete all scenes to enable Submit."}
                   </div>
                 </div>
               </>
             )}
-          </div>
-        </div>
-      );
-
-      function clearAllData() {
-        if (!confirm('This will clear your rater ID and ALL saved annotations for this study on this device. Continue?')) return;
-        try {
-          localStorage.removeItem('mv3d_rater_id');
-          localStorage.removeItem('mv3d_phase');
-          localStorage.removeItem(LS_KEY(study.studyId));
-          localStorage.removeItem(ORDER_KEY(study.studyId));
-        } catch {}
-        setRaterId(randomRaterId());
-        setAnnos(loadInitialAnnos(study));
-        setSceneIdx(0);
-        setSetTab(0);
-        setActivePairId(null);
-        setPhase('intro');
-        setUiOrder(buildOrLoadUiOrder(study));
-        alert('Cleared. You can start fresh.');
-      }
-    }
-
-    // Practice panel used on the Instruction screen (sandboxed — not saved)
-    function PracticePanel() {
-      const [pairs, setPairs] = useState([]);
-      const [activePairId, setActivePairId] = useState(null);
-
-      const newPair = () => {
-        const color = COLORS[pairs.length % COLORS.length];
-        const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
-        setPairs((arr) => [...arr, p]);
-        setActivePairId(p.pairId);
-      };
-      const onFinishRect = (pairId, rect) => {
-        const target = pairs.find((p) => p.pairId === pairId);
-        const newLen = (target?.rects.length || 0) + 1;
-        setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
-        if (newLen >= 2) setActivePairId(null); else setActivePairId(pairId);
-      };
-      const onUpdateRect = () => {};
-      const reset = () => { setPairs([]); setActivePairId(null); };
-
-      const setDef = { images: [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
-      ]};
-
-      return (
-        <div className="border rounded-xl p-3 bg-white">
-          <div className="flex items-center justify-between mb-2">
-            <div className="font-semibold">Practice area (try it here)</div>
-            <div className="flex gap-2">
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={newPair}>New pair</button>
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
-            </div>
-          </div>
-          <SetViewer
-            setDef={setDef}
-            anno={{ pairs }}
-            activePairId={activePairId}
-            onFinishRect={onFinishRect}
-            onStartDrawing={() => { if (!activePairId) newPair(); }}
-            onUpdateRect={onUpdateRect}
-          />
-          <div className="text-xs text-neutral-600 mt-2">
-            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
-          </div>
-        </div>
-      );
-    }
-
-    function IntroScreen({ raterId, setRaterId, onStart, onClearAll }) {
-      return (
-        <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
-          <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
-          <InstructionsPanel />
-          <PracticePanel />
-
-          <div className="flex items-center gap-3 my-4">
-            <label className="text-sm w-24">Rater ID</label>
-            <input
-              className="flex-1 text-sm px-3 py-2 rounded-md border"
-              placeholder="e.g., r-8f4k-27"
-              value={raterId}
-              onChange={(e) => setRaterId(e.target.value)}
-            />
-            <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())}>
-              Randomize
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
-            <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
-                    disabled={!raterId} onClick={onStart}>
-              Start rating ▶
-            </button>
           </div>
         </div>
       );
@@ -1005,7 +1051,7 @@
     // Mount
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
-    </script>
+  </script>
 
   </body>
 </html>
