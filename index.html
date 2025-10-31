@@ -15,6 +15,10 @@
       html, body, #root { height: 100%; }
       body { margin: 0; background: #fafafa; }
       button:focus { outline: 2px solid #000; outline-offset: 2px; }
+      .anno-rect { cursor: move; }
+      .resize-handle { width: 10px; height: 10px; position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4); border-radius: 2px; background: currentColor; cursor: nwse-resize; }
+      .handle-nw, .handle-se { cursor: nwse-resize; }
+      .handle-ne, .handle-sw { cursor: nesw-resize; }
     </style>
   </head>
   <body>
@@ -23,6 +27,13 @@
     <!-- The entire app -->
     <script type="text/babel" data-presets="react,env">
     const { useEffect, useMemo, useRef, useState } = React;
+
+    // ======= CONFIG =======
+    // Optional: add a video URL to show on the Instruction screen (mp4/webm hosted anywhere, incl. GitHub)
+   // const INTRO_VIDEO_URL = ""; // e.g., "https://your.cdn/path/demo.mp4"
+
+    // Google Sheets endpoint (Apps Script web app URL)
+    const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
     // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
     const SAMPLE_STUDY = {
@@ -70,10 +81,6 @@
       ],
     };
 
-    // ======= Google Sheets endpoint (leave as your current value) =======
-    // Example: const ENDPOINT = "https://script.google.com/macros/s/AKfycbx.../exec";
-    const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
-
     // ======= Helpers =======
     const COLORS = ["#ff3b30","#ff9500","#ffcc00","#34c759","#00c7be","#32ade6","#5856d6","#af52de","#ff2d55","#8e8e93"];
     const uid = () => Math.random().toString(36).slice(2, 9);
@@ -83,7 +90,6 @@
 
     // Short random rater id (stable until cleared; editable by rater)
     const randomRaterId = () => {
-      // 4 symbols from base36, plus 2 digits → e.g., r-8f4k-27
       const a = Math.random().toString(36).slice(2, 6);
       const b = String(Math.floor(Math.random() * 100)).padStart(2, "0");
       return `r-${a}-${b}`;
@@ -108,13 +114,16 @@
       el.remove();
     }
 
-    // ======= ImageBox (no cropping, draws overlays) =======
-    function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing }) {
-      const ref = React.useRef(null);
-      const [drag, setDrag] = React.useState(null); // {startX, startY, curX, curY}
-      const [imgDims, setImgDims] = React.useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
+    // ======= ImageBox with draw + drag + resize =======
+    function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
+      const ref = useRef(null);
+      const [drag, setDrag] = useState(null); // drawing: {startX,startY,curX,curY}
+      const [imgDims, setImgDims] = useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
 
-      React.useEffect(() => {
+      // edit state for move/resize
+      const editRef = useRef(null); // { pairId, rectIndex, mode: 'move'|'resize', handle?: 'nw'|'ne'|'sw'|'se', startRect, startClientX, startClientY }
+
+      useEffect(() => {
         const el = ref.current;
         if (!el) return;
         const img = el.querySelector("img");
@@ -133,78 +142,208 @@
         return () => ro.disconnect();
       }, [src]);
 
-      const start = (e) => {
+      const clientToNatural = (cx, cy) => {
+        const box = ref.current.getBoundingClientRect();
+        const x = clamp(cx - box.left, 0, box.width);
+        const y = clamp(cy - box.top, 0, box.height);
+        const nx = (x / box.width)  * imgDims.naturalW;
+        const ny = (y / box.height) * imgDims.naturalH;
+        return { nx, ny, boxW: box.width, boxH: box.height };
+      };
+
+      // DRAWING (background mousedown)
+      const onBackgroundMouseDown = (e) => {
+        // if clicking on a rect or handle, don't start drawing
+        if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
         onStartDrawing?.();
+
         const box = ref.current.getBoundingClientRect();
         const x = clamp(e.clientX - box.left, 0, box.width);
         const y = clamp(e.clientY - box.top, 0, box.height);
         setDrag({ startX: x, startY: y, curX: x, curY: y });
       };
-      const move = (e) => {
-        if (!drag) return;
-        const box = ref.current.getBoundingClientRect();
-        const x = clamp(e.clientX - box.left, 0, box.width);
-        const y = clamp(e.clientY - box.top, 0, box.height);
-        setDrag((d) => ({ ...d, curX: x, curY: y }));
+      const onMouseMove = (e) => {
+        // drawing rubber-band
+        if (drag) {
+          const box = ref.current.getBoundingClientRect();
+          const x = clamp(e.clientX - box.left, 0, box.width);
+          const y = clamp(e.clientY - box.top, 0, box.height);
+          setDrag((d) => ({ ...d, curX: x, curY: y }));
+        }
+        // moving/resizing
+        if (editRef.current) {
+          const { nx, ny } = clientToNatural(e.clientX, e.clientY);
+          const action = editRef.current;
+          const r0 = action.startRect;
+
+          let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
+          if (action.mode === 'move') {
+            const { nx: sx, ny: sy } = clientToNatural(action.startClientX, action.startClientY);
+            const dx = nx - sx, dy = ny - sy;
+            nx1 = clamp(r0.x + dx, 0, imgDims.naturalW - r0.w);
+            ny1 = clamp(r0.y + dy, 0, imgDims.naturalH - r0.h);
+          } else if (action.mode === 'resize') {
+            // corner resize
+            const minSize = 8; // in natural px
+            const right = r0.x + r0.w;
+            const bottom = r0.y + r0.h;
+
+            if (action.handle === 'nw') {
+              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
+              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+            } else if (action.handle === 'ne') {
+              nx1 = r0.x;
+              const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
+              nw = newRight - r0.x;
+              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+            } else if (action.handle === 'sw') {
+              ny1 = r0.y;
+              const newBottom = clamp(ny, r0.y + minSize, imgDims.naturalH);
+              nh = newBottom - r0.y;
+              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
+            } else if (action.handle === 'se') {
+              nx1 = r0.x;
+              ny1 = r0.y;
+              const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
+              const newBottom = clamp(ny, r0.y + minSize, imgDims.naturalH);
+              nw = newRight - r0.x;
+              nh = newBottom - r0.y;
+            }
+          }
+          const newRect = { x: nx1, y: ny1, w: nw, h: nh, imageIndex };
+          onUpdateRect(action.pairId, action.rectIndex, newRect);
+        }
       };
-      const end = () => {
-        if (!drag) return;
-        const { startX, startY, curX, curY } = drag;
-        const box = ref.current.getBoundingClientRect();
-        const x = Math.min(startX, curX);
-        const y = Math.min(startY, curY);
-        const w = Math.abs(curX - startX);
-        const h = Math.abs(curY - startY);
-        // normalize to image natural pixels
-        const nx = (x / box.width) * imgDims.naturalW;
-        const ny = (y / box.height) * imgDims.naturalH;
-        const nw = (w / box.width) * imgDims.naturalW;
-        const nh = (h / box.height) * imgDims.naturalH;
-        onFinishRect?.(activePairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
-        setDrag(null);
+      const onMouseUp = () => {
+        if (drag) {
+          // finish drawing
+          const { startX, startY, curX, curY } = drag;
+          const box = ref.current.getBoundingClientRect();
+          const x = Math.min(startX, curX);
+          const y = Math.min(startY, curY);
+          const w = Math.abs(curX - startX);
+          const h = Math.abs(curY - startY);
+
+          const nx = (x / box.width)  * imgDims.naturalW;
+          const ny = (y / box.height) * imgDims.naturalH;
+          const nw = (w / box.width)  * imgDims.naturalW;
+          const nh = (h / box.height) * imgDims.naturalH;
+
+          onFinishRect?.(activePairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
+          setDrag(null);
+        }
+        if (editRef.current) editRef.current = null;
       };
 
+      // TRANSLATE rect (natural -> client)
       const toClient = (r) => {
         const bx = r.x / imgDims.naturalW;
         const by = r.y / imgDims.naturalH;
         const bw = r.w / imgDims.naturalW;
         const bh = r.h / imgDims.naturalH;
-        return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
+        return {
+          left: `${bx * 100}%`,
+          top: `${by * 100}%`,
+          width: `${bw * 100}%`,
+          height: `${bh * 100}%`,
+        };
+      };
+
+      // MOVE mousedown on rect
+      const onRectMouseDown = (e, pairId, rectIndex, rect) => {
+        e.stopPropagation();
+        editRef.current = {
+          pairId, rectIndex, mode: 'move',
+          startRect: { ...rect },
+          startClientX: e.clientX,
+          startClientY: e.clientY
+        };
+      };
+
+      // RESIZE mousedown on corner handle
+      const onHandleMouseDown = (e, pairId, rectIndex, rect, handle) => {
+        e.stopPropagation();
+        editRef.current = {
+          pairId, rectIndex, mode: 'resize', handle,
+          startRect: { ...rect },
+          startClientX: e.clientX,
+          startClientY: e.clientY
+        };
       };
 
       return (
         <div
           ref={ref}
-          onMouseDown={start}
-          onMouseMove={move}
-          onMouseUp={end}
+          onMouseDown={onBackgroundMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
           className="relative w-full select-none bg-white rounded-xl"
           title="Click-drag to draw a rectangle"
         >
           <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
+
+          {/* Existing rectangles */}
           {pairs.map((p) =>
-            p.rects.filter((r) => r.imageIndex === imageIndex).map((r, i) => (
-              <div key={p.pairId + i} className="absolute box-border"
-                style={{ ...toClient(r), border: `3px solid ${p.color}`, borderRadius: 8,
-                        background: p.pairId === activePairId ? `${p.color}22` : "transparent" }}>
-                <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
-                  {p.label || "#" + p.pairId.slice(-3)}
-                </div>
-              </div>
-            )))
-          }
+            p.rects
+              .filter((r) => r.imageIndex === imageIndex)
+              .map((r, i) => {
+                const showHandles = true; // could gate by p.pairId === activePairId
+                return (
+                  <div
+                    key={p.pairId + i}
+                    className="absolute box-border anno-rect"
+                    style={{
+                      ...toClient(r),
+                      border: `3px solid ${p.color}`,
+                      borderRadius: 8,
+                      color: p.color, // used by handle background
+                      background: p.pairId === activePairId ? `${p.color}22` : "transparent",
+                    }}
+                    onMouseDown={(e)=>onRectMouseDown(e, p.pairId, i, r)}
+                  >
+                    <div
+                      className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white"
+                      style={{ background: p.color }}
+                    >
+                      {p.label || "#" + p.pairId.slice(-3)}
+                    </div>
+
+                    {showHandles && (
+                      <>
+                        <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
+                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'nw')}></div>
+                        <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
+                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'ne')}></div>
+                        <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
+                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'sw')}></div>
+                        <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
+                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'se')}></div>
+                      </>
+                    )}
+                  </div>
+                );
+              })
+          )}
+
+          {/* Live rubberband while drawing */}
           {drag && (
-            <div className="absolute border-2 border-dashed pointer-events-none"
-                style={{ left: Math.min(drag.startX, drag.curX), top: Math.min(drag.startY, drag.curY),
-                          width: Math.abs(drag.curX - drag.startX), height: Math.abs(drag.curY - drag.startY),
-                          borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000" }} />
+            <div
+              className="absolute border-2 border-dashed pointer-events-none"
+              style={{
+                left: Math.min(drag.startX, drag.curX),
+                top: Math.min(drag.startY, drag.curY),
+                width: Math.abs(drag.curX - drag.startX),
+                height: Math.abs(drag.curY - drag.startY),
+                borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000",
+              }}
+            />
           )}
         </div>
       );
     }
 
-    function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing }) {
+    function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing, onUpdateRect }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
@@ -216,6 +355,7 @@
                 activePairId={activePairId}
                 onFinishRect={onFinishRect}
                 onStartDrawing={onStartDrawing}
+                onUpdateRect={onUpdateRect}
               />
             </div>
           ))}
@@ -293,7 +433,7 @@
 
           <div className="p-3 rounded-xl border bg-white shadow-sm flex flex-col gap-2">
             <div className="text-xs text-neutral-500">
-              Shortcuts: <kbd>N</kbd> new pair, <kbd>Backspace</kbd> delete active pair, draw with mouse.
+              Shortcuts: <kbd>N</kbd> new pair (not when typing), <kbd>Backspace</kbd> delete active pair (not when typing).
             </div>
             <div className="flex gap-2">
               <button className="px-3 py-2 rounded-lg border" onClick={onPrevScene}>◀ Prev scene</button>
@@ -305,10 +445,66 @@
       );
     }
 
+    // Practice panel used on the Instruction screen (sandboxed — not saved)
+    function PracticePanel() {
+      const [pairs, setPairs] = useState([]);
+      const [activePairId, setActivePairId] = useState(null);
+
+      const newPair = () => {
+        const color = COLORS[pairs.length % COLORS.length];
+        const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
+        setPairs((arr) => [...arr, p]);
+        setActivePairId(p.pairId);
+      };
+      const onFinishRect = (pairId, rect) => {
+        setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
+        setActivePairId(null);
+      };
+      const onUpdateRect = (pairId, rectIndex, newRect) => {
+        setPairs((prev) => prev.map((p) => {
+          if (p.pairId !== pairId) return p;
+          const next = [...p.rects];
+          next[rectIndex] = newRect;
+          return { ...p, rects: next };
+        }));
+      };
+      const reset = () => { setPairs([]); setActivePairId(null); };
+
+      const setDef = { images: [
+        "https://picsum.photos/seed/practice1/512/512",
+        "https://picsum.photos/seed/practice2/512/512",
+        "https://picsum.photos/seed/practice3/512/512",
+        "https://picsum.photos/seed/practice4/512/512",
+      ]};
+
+      return (
+        <div className="border rounded-xl p-3 bg-white">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-semibold">Practice area (try it here)</div>
+            <div className="flex gap-2">
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={newPair}>New pair</button>
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
+            </div>
+          </div>
+          <SetViewer
+            setDef={setDef}
+            anno={{ pairs }}
+            activePairId={activePairId}
+            onFinishRect={onFinishRect}
+            onStartDrawing={() => { if (!activePairId) newPair(); }}
+            onUpdateRect={onUpdateRect}
+          />
+          <div className="text-xs text-neutral-600 mt-2">
+            Tip: click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
+          </div>
+        </div>
+      );
+    }
+
     // Intro / Instructions screen shown before scenes
     function IntroScreen({ study, raterId, setRaterId, onStart, onClearAll }) {
       return (
-        <div className="max-w-3xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
+        <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
           <p className="text-sm text-neutral-700 mb-4">
             Task: For each scene, you’ll see two sets of 4 views (two algorithms). Mark <b>paired rectangles</b> on
@@ -317,12 +513,26 @@
           <ol className="list-decimal ml-6 text-sm text-neutral-800 space-y-1 mb-4">
             <li>Pick a set tab at the top.</li>
             <li>Click <b>New pair (N)</b>, then draw a rectangle on one view and a matching rectangle on another view.</li>
-            <li>Optionally label pairs (e.g., “nose tip”, “eyebrow”).</li>
-            <li>You can add multiple pairs; or if consistent, click <b>Mark no inconsistencies</b>.</li>
+            <li>You can <b>move</b> a rectangle by dragging it, and <b>resize</b> it by dragging a corner handle.</li>
+            <li>Optionally label pairs (e.g., “nose tip”, “earring”, “eyebrow”).</li>
+            <li>If a set looks consistent, click <b>Mark no inconsistencies</b>.</li>
             <li>Proceed when both sets are annotated (pairs or none).</li>
           </ol>
 
-          <div className="flex items-center gap-3 mb-4">
+          {INTRO_VIDEO_URL ? (
+            <div className="mb-4">
+              <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
+              <div className="text-xs text-neutral-500 mt-1">Short demo: drawing, moving, and resizing rectangles.</div>
+            </div>
+          ) : (
+            <div className="mb-4 p-3 rounded-lg border bg-neutral-50 text-sm">
+              Want a short video demo here? Record a quick screen capture and set <code>INTRO_VIDEO_URL</code> at the top of the file.
+            </div>
+          )}
+
+          <PracticePanel />
+
+          <div className="flex items-center gap-3 my-4">
             <label className="text-sm w-24">Rater ID</label>
             <input
               className="flex-1 text-sm px-3 py-2 rounded-md border"
@@ -402,16 +612,13 @@
       useEffect(() => {
         const h = (e) => {
           const tag = e.target && e.target.tagName;
-          const isTyping =
-            (tag === 'INPUT' || tag === 'TEXTAREA') ||
-            (e.target && e.target.isContentEditable);
-          if (isTyping) return; // <-- crucial fix
+          const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA') || (e.target && e.target.isContentEditable);
+          if (isTyping) return;
 
           if (e.key === "n" || e.key === "N") {
             e.preventDefault();
             newPair();
           } else if (e.key === "Backspace") {
-            // only when not typing & an active pair exists
             if (activePairId) {
               e.preventDefault();
               deletePair(activePairId);
@@ -461,7 +668,9 @@
         const blank = {};
         for (const sc of studyObj.scenes) {
           const setsMap = {};
-          for (const s of sc.sets) setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
+          for (const s of sc.sets) {
+            setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
+          }
           blank[sc.sceneId] = { sceneId: sc.sceneId, sets: setsMap };
         }
         return blank;
@@ -508,12 +717,23 @@
         const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
         if (idx < 0) return;
         const p = setAnno.pairs[idx];
-        if (p.rects.length >= 2) return;
+        if (p.rects.length >= 2) return; // enforce pair of 2
         const updated = { ...p, rects: [...p.rects, rect] };
         const arr = [...setAnno.pairs];
         arr[idx] = updated;
         updateSetAnno({ ...setAnno, pairs: arr });
         if (updated.rects.length >= 2) setActivePairId(null);
+      }
+
+      function onUpdateRect(pairId, rectIndex, newRect) {
+        const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
+        if (idx < 0) return;
+        const p = setAnno.pairs[idx];
+        const rects = [...p.rects];
+        rects[rectIndex] = newRect;
+        const arr = [...setAnno.pairs];
+        arr[idx] = { ...p, rects };
+        updateSetAnno({ ...setAnno, pairs: arr });
       }
 
       function onImport(json) {
@@ -562,36 +782,23 @@
       }
 
       async function submitToServer() {
-      try {
-        if (!raterId) { alert('Please enter your Rater ID.'); return; }
-        if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
-          alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
-          return;
+        try {
+          if (!raterId) { alert('Please enter your Rater ID.'); return; }
+          if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
+            alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
+            return;
+          }
+          const fd = new FormData();
+          fd.append('raterId', raterId);
+          fd.append('studyId', study.studyId);
+          fd.append('payload', JSON.stringify({ study, annos, exportedAt: new Date().toISOString() }));
+          await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
+          alert('Submitted! Check the Google Sheet for the new row.');
+        } catch (err) {
+          console.error('Submission failed:', err);
+          alert('Submission failed. See console.');
         }
-
-        const fd = new FormData();
-        fd.append('raterId', raterId);
-        fd.append('studyId', study.studyId);
-        fd.append('payload', JSON.stringify({
-          study,
-          annos,
-          exportedAt: new Date().toISOString()
-        }));
-
-        // no-cors -> opaque response (we can't read it, but the Sheet will get it)
-        await fetch(ENDPOINT, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: fd
-        });
-
-        alert('Submitted! Check the Google Sheet for the new row.');
-      } catch (err) {
-        console.error('Submission failed:', err);
-        alert('Submission failed. See console.');
       }
-    }
-
 
       function clearAllData() {
         if (!confirm('This will clear your rater ID and ALL saved annotations for this study on this device. Continue?')) return;
@@ -600,7 +807,6 @@
           localStorage.removeItem('mv3d_phase');
           localStorage.removeItem(LS_KEY(study.studyId));
         } catch {}
-        // reset state
         setRaterId(randomRaterId());
         setAnnos(loadInitialAnnos(study));
         setSceneIdx(0);
@@ -683,6 +889,7 @@
                       activePairId={activePairId}
                       onFinishRect={handleFinishRect}
                       onStartDrawing={() => { if (!activePairId) newPair(); }}
+                      onUpdateRect={onUpdateRect}
                     />
                   </div>
                   <Sidebar
