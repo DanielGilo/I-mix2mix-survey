@@ -125,7 +125,7 @@
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time</b>
+            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time </b>
             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
             <b> inconsistencies between images within the same set</b>.
           </p>
@@ -207,7 +207,6 @@
         return { ...r, x, y, w, h };
       };
 
-      // ---- Pointer handlers (capture keeps us safe even if pointer leaves) ----
       const onBackgroundPointerDown = (e) => {
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
@@ -518,7 +517,6 @@
         setPairs((prev) => prev.map((p) => {
           if (p.pairId !== pairId) return p;
           const nextRects = [...p.rects];
-          // preserve imageIndex (never move across images)
           nextRects[rectIndex] = { ...newRect, imageIndex: nextRects[rectIndex]?.imageIndex ?? newRect.imageIndex };
           return { ...p, rects: nextRects };
         }));
@@ -587,8 +585,23 @@
       );
     }
 
+    // Thank-you screen (shown after successful submit)
+    function ThankYouScreen({ studyId }) {
+      return (
+        <div className="max-w-2xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
+          <div className="text-2xl font-semibold">Thank you!</div>
+          <div className="mt-2 text-neutral-700">
+            Your responses for <b>{studyId}</b> were submitted successfully.
+          </div>
+          <div className="mt-4 text-sm text-neutral-500">
+            You may close this tab now. If you need to make changes, please contact the study organizer.
+          </div>
+        </div>
+      );
+    }
+
     // Header
-    function HeaderBar({ study, progressText, raterId, setRaterId, onSubmit, onClearAll, onToggleInstructions, showInstructions, canSubmit }) {
+    function HeaderBar({ study, progressText, raterId, setRaterId, onSubmit, onClearAll, onToggleInstructions, showInstructions, canSubmit, phase }) {
       return (
         <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
@@ -598,20 +611,24 @@
               <div className="text-xs text-neutral-500">{progressText}</div>
             </div>
             <div className="flex items-center gap-2">
-              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
-                    value={raterId} onChange={(e) => setRaterId(e.target.value)} />
-              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onToggleInstructions}>
-                {showInstructions ? "Hide instructions" : "Show instructions"}
-              </button>
-              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
-              <button
-                className={`text-sm px-3 py-1.5 rounded-md border ${(!canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
-                disabled={!canSubmit || ENDPOINT.includes("PASTE_")}
-                onClick={onSubmit}
-                title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}
-              >
-                Submit
-              </button>
+              {phase !== 'thanks' && (
+                <>
+                  <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
+                        value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+                  <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onToggleInstructions}>
+                    {showInstructions ? "Hide instructions" : "Show instructions"}
+                  </button>
+                  <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
+                  <button
+                    className={`text-sm px-3 py-1.5 rounded-md border ${(!canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
+                    disabled={!canSubmit || ENDPOINT.includes("PASTE_")}
+                    onClick={onSubmit}
+                    title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}
+                  >
+                    Submit
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -629,7 +646,7 @@
       const [configError, setConfigError] = useState(null);
       const [configSource, setConfigSource] = useState(null);
 
-      // phase: 'intro' | 'rate'
+      // phase: 'intro' | 'rate' | 'thanks'
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
 
       // show instructions on rating screen — default hidden
@@ -771,7 +788,6 @@
         if (idx < 0) return;
         const p = setAnno.pairs[idx];
         const rects = [...p.rects];
-        // preserve original imageIndex
         rects[rectIndex] = { ...newRect, imageIndex: rects[rectIndex]?.imageIndex ?? newRect.imageIndex };
         const arr = [...setAnno.pairs];
         arr[idx] = { ...p, rects };
@@ -799,7 +815,6 @@
 
       function isSetDone(aSetAnno) {
         return aSetAnno.noInconsistencies || aSetAnno.pairs.some((p) => p.rects.length === 2);
-        // (You can tighten this to require ALL pairs complete if desired.)
       }
 
       function canProceedScene() {
@@ -857,7 +872,8 @@
             hiddenSetLabels: HIDDEN_SET_LABELS
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
-          alert('Submitted! Check the Google Sheet for the new row.');
+          // If we got here, consider it successful and move to Thank You screen
+          setPhase('thanks');
         } catch (err) {
           console.error('Submission failed:', err);
           alert('Submission failed. See console.');
@@ -883,9 +899,10 @@
         alert('Cleared. You can start fresh.');
       }
 
-      const progressText = phase === 'rate'
-        ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
-        : `Instructions`;
+      const progressText =
+        phase === 'thanks' ? "Submitted" :
+        phase === 'rate'   ? `${sceneIdx + 1} / ${study.scenes.length} scenes` :
+                             `Instructions`;
 
       const canSubmit = isStudyComplete() && !!raterId;
 
@@ -901,6 +918,7 @@
             onToggleInstructions={() => setShowInstructions((v)=>!v)}
             showInstructions={showInstructions}
             canSubmit={canSubmit}
+            phase={phase}
           />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
@@ -920,14 +938,16 @@
               </div>
             )}
 
-            {phase === 'intro' ? (
+            {phase === 'intro' && (
               <IntroScreen
                 raterId={raterId}
                 setRaterId={setRaterId}
                 onStart={() => setPhase('rate')}
                 onClearAll={clearAllData}
               />
-            ) : (
+            )}
+
+            {phase === 'rate' && (
               <>
                 {showInstructions && <InstructionsPanel />}
 
@@ -980,6 +1000,10 @@
                   </div>
                 </div>
               </>
+            )}
+
+            {phase === 'thanks' && (
+              <ThankYouScreen studyId={study.studyId} />
             )}
           </div>
         </div>
