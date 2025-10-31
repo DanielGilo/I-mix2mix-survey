@@ -1,0 +1,31 @@
+{
+  "studyId": "mv3d_example",
+  "instructions": "Mark paired rectangles where multi-view images disagree.",
+  "setNames": ["I-GS2GS", "I-GS2GS"],
+  "scenes": [
+    {
+      "sceneId": "example_scene",
+      "title": "Cowboy",
+      "sets": [
+        {
+          "setId": "igs2gs_example_1",
+          "images": [
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png"
+          ]
+        },
+        {
+          "setId": "igs2gs_example_2",
+          "images": [
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+            "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png"
+          ]
+        }
+      ]
+    }
+  ]
+}
