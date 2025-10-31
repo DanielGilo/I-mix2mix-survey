@@ -116,14 +116,14 @@
 
     // ======= ImageBox with draw + drag + resize =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
-      const ref = useRef(null);
-      const [drag, setDrag] = useState(null); // drawing: {startX,startY,curX,curY}
-      const [imgDims, setImgDims] = useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
+      const ref = React.useRef(null);
+      const [drag, setDrag] = React.useState(null); // drawing: {startX,startY,curX,curY}
+      const [imgDims, setImgDims] = React.useState({ naturalW: 0, naturalH: 0, clientW: 0, clientH: 0 });
 
       // edit state for move/resize
-      const editRef = useRef(null); // { pairId, rectIndex, mode: 'move'|'resize', handle?: 'nw'|'ne'|'sw'|'se', startRect, startClientX, startClientY }
+      const editRef = React.useRef(null); // { pairId, rectIndex(abs), mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
 
-      useEffect(() => {
+      React.useEffect(() => {
         const el = ref.current;
         if (!el) return;
         const img = el.querySelector("img");
@@ -142,6 +142,8 @@
         return () => ro.disconnect();
       }, [src]);
 
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
       const clientToNatural = (cx, cy) => {
         const box = ref.current.getBoundingClientRect();
         const x = clamp(cx - box.left, 0, box.width);
@@ -151,9 +153,8 @@
         return { nx, ny, boxW: box.width, boxH: box.height };
       };
 
-      // DRAWING (background mousedown)
+      // DRAWING on background
       const onBackgroundMouseDown = (e) => {
-        // if clicking on a rect or handle, don't start drawing
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
         onStartDrawing?.();
@@ -163,6 +164,7 @@
         const y = clamp(e.clientY - box.top, 0, box.height);
         setDrag({ startX: x, startY: y, curX: x, curY: y });
       };
+
       const onMouseMove = (e) => {
         // drawing rubber-band
         if (drag) {
@@ -184,8 +186,7 @@
             nx1 = clamp(r0.x + dx, 0, imgDims.naturalW - r0.w);
             ny1 = clamp(r0.y + dy, 0, imgDims.naturalH - r0.h);
           } else if (action.mode === 'resize') {
-            // corner resize
-            const minSize = 8; // in natural px
+            const minSize = 8;
             const right = r0.x + r0.w;
             const bottom = r0.y + r0.h;
 
@@ -212,12 +213,12 @@
             }
           }
           const newRect = { x: nx1, y: ny1, w: nw, h: nh, imageIndex };
-          onUpdateRect(action.pairId, action.rectIndex, newRect);
+          onUpdateRect(action.pairId, action.rectIndex /* absolute! */, newRect);
         }
       };
+
       const onMouseUp = () => {
         if (drag) {
-          // finish drawing
           const { startX, startY, curX, curY } = drag;
           const box = ref.current.getBoundingClientRect();
           const x = Math.min(startX, curX);
@@ -236,25 +237,21 @@
         if (editRef.current) editRef.current = null;
       };
 
-      // TRANSLATE rect (natural -> client)
       const toClient = (r) => {
         const bx = r.x / imgDims.naturalW;
         const by = r.y / imgDims.naturalH;
         const bw = r.w / imgDims.naturalW;
         const bh = r.h / imgDims.naturalH;
-        return {
-          left: `${bx * 100}%`,
-          top: `${by * 100}%`,
-          width: `${bw * 100}%`,
-          height: `${bh * 100}%`,
-        };
+        return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
       };
 
       // MOVE mousedown on rect
-      const onRectMouseDown = (e, pairId, rectIndex, rect) => {
+      const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
         editRef.current = {
-          pairId, rectIndex, mode: 'move',
+          pairId,
+          rectIndex: absIndex,   // <-- absolute index within pair.rects
+          mode: 'move',
           startRect: { ...rect },
           startClientX: e.clientX,
           startClientY: e.clientY
@@ -262,15 +259,24 @@
       };
 
       // RESIZE mousedown on corner handle
-      const onHandleMouseDown = (e, pairId, rectIndex, rect, handle) => {
+      const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
         e.stopPropagation();
         editRef.current = {
-          pairId, rectIndex, mode: 'resize', handle,
+          pairId,
+          rectIndex: absIndex,   // <-- absolute index within pair.rects
+          mode: 'resize',
+          handle,
           startRect: { ...rect },
           startClientX: e.clientX,
           startClientY: e.clientY
         };
       };
+
+      // Helper: iterate rects with absolute indices, then filter by image
+      const rectsForThisImage = (p) =>
+        p.rects
+          .map((r, absIndex) => ({ r, absIndex }))
+          .filter(({ r }) => r.imageIndex === imageIndex);
 
       return (
         <div
@@ -283,47 +289,42 @@
         >
           <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
-          {/* Existing rectangles */}
+          {/* Existing rectangles (use ABSOLUTE index!) */}
           {pairs.map((p) =>
-            p.rects
-              .filter((r) => r.imageIndex === imageIndex)
-              .map((r, i) => {
-                const showHandles = true; // could gate by p.pairId === activePairId
-                return (
-                  <div
-                    key={p.pairId + i}
-                    className="absolute box-border anno-rect"
-                    style={{
-                      ...toClient(r),
-                      border: `3px solid ${p.color}`,
-                      borderRadius: 8,
-                      color: p.color, // used by handle background
-                      background: p.pairId === activePairId ? `${p.color}22` : "transparent",
-                    }}
-                    onMouseDown={(e)=>onRectMouseDown(e, p.pairId, i, r)}
-                  >
-                    <div
-                      className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white"
-                      style={{ background: p.color }}
-                    >
-                      {p.label || "#" + p.pairId.slice(-3)}
-                    </div>
-
-                    {showHandles && (
-                      <>
-                        <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'nw')}></div>
-                        <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'ne')}></div>
-                        <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'sw')}></div>
-                        <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                             onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, i, r, 'se')}></div>
-                      </>
-                    )}
+            rectsForThisImage(p).map(({ r, absIndex }) => {
+              const showHandles = true; // or p.pairId === activePairId
+              return (
+                <div
+                  key={p.pairId + '-' + absIndex}
+                  className="absolute box-border anno-rect"
+                  style={{
+                    ...toClient(r),
+                    border: `3px solid ${p.color}`,
+                    borderRadius: 8,
+                    color: p.color,
+                    background: p.pairId === activePairId ? `${p.color}22` : "transparent",
+                  }}
+                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
+                >
+                  <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
+                    {p.label || "#" + p.pairId.slice(-3)}
                   </div>
-                );
-              })
+
+                  {showHandles && (
+                    <>
+                      <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
+                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                      <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
+                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                      <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
+                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                      <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
+                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
+                    </>
+                  )}
+                </div>
+              );
+            })
           )}
 
           {/* Live rubberband while drawing */}
@@ -342,6 +343,7 @@
         </div>
       );
     }
+
 
     function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing, onUpdateRect }) {
       return (
