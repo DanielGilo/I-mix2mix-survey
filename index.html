@@ -126,65 +126,92 @@
       el.remove();
     }
 
-    // ======= ImageBox (draw/move/resize) =======
+    // ======= ImageBox (letterbox-safe + global drag listeners) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
-      const [drag, setDrag] = React.useState(null);
-      const [imgDims, setImgDims] = React.useState({ naturalW: 1, naturalH: 1, clientW: 1, clientH: 1 });
-      const editRef = React.useRef(null);
+      const imgRef = React.useRef(null);
+
+      // drawing state: in CLIENT pixels relative to the <img> rect
+      const [drag, setDrag] = React.useState(null); // {startX,startY,curX,curY}
+      // image dimensions (natural + displayed client size)
+      const [imgDims, setImgDims] = React.useState({
+        naturalW: 1, naturalH: 1, clientW: 1, clientH: 1, left: 0, top: 0
+      });
+
+      // edit state for move/resize in NATURAL coords
+      const editRef = React.useRef(null); // { pairId, rectIndex, mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
+
+      // measure image box safely (letterbox aware)
+      const measure = React.useCallback(() => {
+        const img = imgRef.current;
+        if (!img) return;
+        const r = img.getBoundingClientRect();
+        setImgDims({
+          naturalW: img.naturalWidth || 1,
+          naturalH: img.naturalHeight || 1,
+          clientW: r.width || 1,
+          clientH: r.height || 1,
+          left: r.left || 0,
+          top: r.top || 0,
+        });
+      }, []);
 
       React.useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const img = el.querySelector("img");
-        function update() {
-          if (!img) return;
-          setImgDims({
-            naturalW: img.naturalWidth  || 1,
-            naturalH: img.naturalHeight || 1,
-            clientW:  img.clientWidth   || 1,
-            clientH:  img.clientHeight  || 1,
-          });
-        }
-        update();
+        measure();
+        const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+        if (ro && ref.current) ro.observe(ref.current);
+        window.addEventListener("resize", measure);
+        const onLoad = () => measure();
+        const img = imgRef.current;
+        if (img) img.addEventListener("load", onLoad);
 
-        if (typeof ResizeObserver !== "undefined") {
-          const ro = new ResizeObserver(update);
-          ro.observe(el);
-          return () => ro.disconnect();
-        } else {
-          window.addEventListener("resize", update);
-          return () => window.removeEventListener("resize", update);
-        }
-      }, [src]);
+        return () => {
+          if (ro && ref.current) ro.disconnect();
+          window.removeEventListener("resize", measure);
+          if (img) img.removeEventListener("load", onLoad);
+        };
+      }, [src, measure]);
 
-      const clientToNatural = (cx, cy) => {
-        const box = ref.current.getBoundingClientRect();
-        const x = clamp(cx - box.left, 0, box.width);
-        const y = clamp(cy - box.top, 0, box.height);
-        const nx = (x / box.width)  * imgDims.naturalW;
-        const ny = (y / box.height) * imgDims.naturalH;
-        return { nx, ny, boxW: box.width, boxH: box.height };
+      // Convert window client coords to NATURAL image coords, clamped to the displayed image rect
+      const clientToNatural = (clientX, clientY) => {
+        const { left, top, clientW, clientH, naturalW, naturalH } = imgDims;
+        // clamp to img’s displayed rectangle (not the container)
+        const x = clamp(clientX - left, 0, clientW);
+        const y = clamp(clientY - top, 0, clientH);
+        const nx = (x / clientW) * naturalW;
+        const ny = (y / clientH) * naturalH;
+        return { nx, ny, x, y };
       };
 
+      // --- start drawing only if inside the image and an active pair exists
       const onBackgroundMouseDown = (e) => {
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
+
+        // must start inside the <img> rect
+        const { left, top, clientW, clientH } = imgDims;
+        const inside =
+          e.clientX >= left && e.clientX <= left + clientW &&
+          e.clientY >= top  && e.clientY <= top  + clientH;
+        if (!inside) return;
+
         if (onStartDrawing) onStartDrawing();
 
-        const box = ref.current.getBoundingClientRect();
-        const x = clamp(e.clientX - box.left, 0, box.width);
-        const y = clamp(e.clientY - box.top, 0, box.height);
-        setDrag({ startX: x, startY: y, curX: x, curY: y });
+        // keep draw coords in client space relative to img
+        setDrag({
+          startX: e.clientX, startY: e.clientY,
+          curX: e.clientX, curY: e.clientY
+        });
+
+        // attach global listeners for robust drag outside
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
         e.preventDefault();
       };
 
-      const onMouseMove = (e) => {
+      const onWindowMouseMove = (e) => {
         if (drag) {
-          const box = ref.current.getBoundingClientRect();
-          const x = clamp(e.clientX - box.left, 0, box.width);
-          const y = clamp(e.clientY - box.top, 0, box.height);
-          setDrag((d) => ({ ...d, curX: x, curY: y }));
+          setDrag((d) => ({ ...d, curX: e.clientX, curY: e.clientY }));
         }
         if (editRef.current) {
           const { nx, ny } = clientToNatural(e.clientX, e.clientY);
@@ -194,17 +221,16 @@
           let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
           if (action.mode === 'move') {
             const start = clientToNatural(action.startClientX, action.startClientY);
-            const dx = nx - start.nx, dy = ny - start.ny;
-            nx1 = clamp(r0.x + dx, 0, imgDims.naturalW - r0.w);
-            ny1 = clamp(r0.y + dy, 0, imgDims.naturalH - r0.h);
+            nx1 = clamp(r0.x + (nx - start.nx), 0, imgDims.naturalW - r0.w);
+            ny1 = clamp(r0.y + (ny - start.ny), 0, imgDims.naturalH - r0.h);
           } else if (action.mode === 'resize') {
             const minSize = 8;
             const right = r0.x + r0.w;
             const bottom = r0.y + r0.h;
 
             if (action.handle === 'nw') {
-              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
-              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+              nx1 = clamp(nx, 0, right - minSize); const ny1Raw = clamp(ny, 0, bottom - minSize);
+              ny1 = ny1Raw; nw = right - nx1; nh = bottom - ny1;
             } else if (action.handle === 'ne') {
               nx1 = r0.x;
               const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
@@ -216,14 +242,13 @@
               nh = newBottom - r0.y;
               nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
             } else if (action.handle === 'se') {
-              nx1 = r0.x;
-              ny1 = r0.y;
+              nx1 = r0.x; ny1 = r0.y;
               const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
               const newBottom = clamp(ny, r0.y + minSize, imgDims.naturalH);
-              nw = newRight - r0.x;
-              nh = newBottom - r0.y;
+              nw = newRight - r0.x; nh = newBottom - r0.y;
             }
           }
+          // final clamp
           nx1 = clamp(nx1, 0, imgDims.naturalW - 1);
           ny1 = clamp(ny1, 0, imgDims.naturalH - 1);
           nw  = clamp(nw,  1, imgDims.naturalW - nx1);
@@ -234,32 +259,32 @@
         }
       };
 
-      const onMouseUp = () => {
+      const onWindowMouseUp = () => {
+        // finish drawing
         if (drag) {
           const { startX, startY, curX, curY } = drag;
-          const box = ref.current.getBoundingClientRect();
-          const x = clamp(Math.min(startX, curX), 0, box.width);
-          const y = clamp(Math.min(startY, curY), 0, box.height);
-          const w = clamp(Math.abs(curX - startX), 1, box.width - x);
-          const h = clamp(Math.abs(curY - startY), 1, box.height - y);
 
-          const nx = (x / box.width)  * imgDims.naturalW;
-          const ny = (y / box.height) * imgDims.naturalH;
-          const nw = (w / box.width)  * imgDims.naturalW;
-          const nh = (h / box.height) * imgDims.naturalH;
+          // convert the two client points to NATURAL, clamped to the image rect
+          const a = clientToNatural(Math.min(startX, curX), Math.min(startY, curY));
+          const b = clientToNatural(Math.max(startX, curX), Math.max(startY, curY));
 
-          const nxC = clamp(nx, 0, imgDims.naturalW - 1);
-          const nyC = clamp(ny, 0, imgDims.naturalH - 1);
-          const nwC = clamp(nw, 1, imgDims.naturalW - nxC);
-          const nhC = clamp(nh, 1, imgDims.naturalH - nyC);
+          const nx = clamp(a.nx, 0, imgDims.naturalW - 1);
+          const ny = clamp(a.ny, 0, imgDims.naturalH - 1);
+          const nw = clamp(b.nx - a.nx, 1, imgDims.naturalW - nx);
+          const nh = clamp(b.ny - a.ny, 1, imgDims.naturalH - ny);
 
-          if (onFinishRect) onFinishRect(activePairId, { x: nxC, y: nyC, w: nwC, h: nhC, imageIndex });
+          if (onFinishRect) onFinishRect(activePairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
           setDrag(null);
         }
-        if (editRef.current) editRef.current = null;
+        editRef.current = null;
+
+        // remove global handlers
+        window.removeEventListener("mousemove", onWindowMouseMove);
+        // mouseup listener was attached with {once:true}
       };
 
-      const toClient = (r) => {
+      // Helpers to convert NATURAL rect to CSS %
+      const toClientStyle = (r) => {
         const bx = r.x / imgDims.naturalW;
         const by = r.y / imgDims.naturalH;
         const bw = r.w / imgDims.naturalW;
@@ -267,6 +292,7 @@
         return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
       };
 
+      // Move / Resize start
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
         e.preventDefault();
@@ -278,6 +304,8 @@
           startClientX: e.clientX,
           startClientY: e.clientY
         };
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
       };
 
       const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
@@ -292,69 +320,76 @@
           startClientX: e.clientX,
           startClientY: e.clientY
         };
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
       };
 
       const rectsForThisImage = (p) =>
-        p.rects
+        (p.rects || [])
           .map((r, absIndex) => ({ r, absIndex }))
           .filter(({ r }) => r.imageIndex === imageIndex);
+
+      // draw overlay box while dragging (client space -> just use client coords)
+      const draftBox = drag ? (() => {
+        const { left, top } = imgDims;
+        const x = Math.min(drag.startX, drag.curX) - left;
+        const y = Math.min(drag.startY, drag.curY) - top;
+        const w = Math.abs(drag.curX - drag.startX);
+        const h = Math.abs(drag.curY - drag.startY);
+        return { x: Math.max(0, x), y: Math.max(0, y), w, h };
+      })() : null;
 
       return (
         <div
           ref={ref}
           onMouseDown={onBackgroundMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUp}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
           title="Click-drag to draw a rectangle"
         >
-          <img src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
+          <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
           {pairs.map((p) =>
             rectsForThisImage(p).map(({ r, absIndex }) => {
-              const showHandles = true;
+              const color = p.color;
               return (
                 <div
                   key={p.pairId + '-' + absIndex}
                   className="absolute box-border anno-rect"
                   style={{
-                    ...toClient(r),
-                    border: `3px solid ${p.color}`,
+                    ...toClientStyle(r),
+                    border: `3px solid ${color}`,
                     borderRadius: 8,
-                    color: p.color,
-                    background: p.pairId === activePairId ? `${p.color}22` : "transparent",
+                    color,
+                    background: p.pairId === activePairId ? `${color}22` : "transparent",
                   }}
                   onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
                 >
-                  <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: p.color }}>
+                  <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: color }}>
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
 
-                  {showHandles && (
-                    <>
-                      <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
-                      <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
-                      <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
-                      <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                          onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
-                    </>
-                  )}
+                  {/* resize handles */}
+                  <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                  <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                  <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                  <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
+                      onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
                 </div>
               );
             })
           )}
 
-          {drag && (
+          {draftBox && (
             <div
               className="absolute border-2 border-dashed pointer-events-none"
               style={{
-                left: Math.min(drag.startX, drag.curX),
-                top: Math.min(drag.startY, drag.curY),
-                width: Math.abs(drag.curX - drag.startX),
-                height: Math.abs(drag.curY - drag.startY),
+                left: draftBox.x,
+                top: draftBox.y,
+                width: draftBox.w,
+                height: draftBox.h,
                 borderColor: ((pairs.find((p) => p.pairId === activePairId) || {}).color) || "#000",
               }}
             />
@@ -362,6 +397,7 @@
         </div>
       );
     }
+
 
     function SetViewer({ setDef, anno, onFinishRect, activePairId, onStartDrawing, onUpdateRect }) {
       return (
@@ -534,7 +570,7 @@
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time</b>
+            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time </b>
             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
             <b> inconsistencies between images within the same set</b>.
           </p>
