@@ -29,7 +29,7 @@
 
     <!-- The entire app -->
     <script type="text/babel" data-presets="env,react">
-    const { useEffect, useMemo, useRef, useState } = React;
+    const { useEffect, useMemo, useState } = React;
 
     // ======= CONFIG =======
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
@@ -86,9 +86,8 @@
     const pretty = (obj) => JSON.stringify(obj, null, 2);
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
-
-    const HIDDEN_SET_LABELS = ["Set A", "Set B"];
     const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
+    const HIDDEN_SET_LABELS = ["Set A", "Set B"];
 
     function buildOrLoadUiOrder(study) {
       try {
@@ -127,12 +126,11 @@
       el.remove();
     }
 
-    // ======= ImageBox with draw + move + resize (robust clamping) =======
+    // ======= ImageBox (draw/move/resize) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
       const [drag, setDrag] = React.useState(null);
       const [imgDims, setImgDims] = React.useState({ naturalW: 1, naturalH: 1, clientW: 1, clientH: 1 });
-
       const editRef = React.useRef(null);
 
       React.useEffect(() => {
@@ -373,7 +371,7 @@
               <ImageBox
                 src={src}
                 imageIndex={idx}
-                pairs={anno.pairs.filter((p) => p.visible)}
+                pairs={(anno.pairs || []).filter((p) => p.visible)}
                 activePairId={activePairId}
                 onFinishRect={onFinishRect}
                 onStartDrawing={onStartDrawing}
@@ -387,9 +385,9 @@
 
     function Sidebar({
       setAnno, onChange, onNewPair, onDeletePair, onTogglePair, onLabelPair,
-      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene, isLastScene
+      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene
     }) {
-      const pairs = setAnno.pairs;
+      const pairs = setAnno.pairs || [];
       const nextColor = useMemo(() => COLORS[pairs.length % COLORS.length], [pairs.length]);
 
       return (
@@ -462,7 +460,7 @@
               <button
                 className={`px-3 py-2 rounded-lg border ${canFinishScene ? "bg-black text-white" : "opacity-50"}`}
                 disabled={!canFinishScene}
-                onClick={() => onNextScene(isLastScene)}
+                onClick={() => onNextScene()}
               >
                 Next scene ▶
               </button>
@@ -485,10 +483,10 @@
       };
       const onFinishRect = (pairId, rect) => {
         const target = pairs.find((p) => p.pairId === pairId);
-        const newLen = ((target && target.rects ? target.rects.length : 0)) + 1;
+        const existing = target ? target.rects.length : 0;
+        const newLen = existing + 1;
         setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
-        if (newLen >= 2) setActivePairId(null);
-        else setActivePairId(pairId);
+        setActivePairId(newLen >= 2 ? null : pairId);
       };
       const onUpdateRect = (pairId, rectIndex, newRect) => {
         setPairs((prev) => prev.map((p) => {
@@ -627,7 +625,7 @@
             </div>
             <div className="flex items-center gap-2">
               {phase === 'rate' && (
-                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => setShowInstr((v) => !v)}>
+                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => setShowInstr(!showInstr)}>
                   {showInstr ? "Hide instructions" : "Show instructions"}
                 </button>
               )}
@@ -659,20 +657,18 @@
       const [configSource, setConfigSource] = useState(null);
 
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
-
       const [showInstr, setShowInstr] = useState(false);
-
       const [raterId, setRaterId] = useState(() => {
         const saved = localStorage.getItem('mv3d_rater_id');
         return saved && saved.trim() ? saved : randomRaterId();
       });
-
       const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
 
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
+      // keyboard shortcuts
       useEffect(() => {
         const h = (e) => {
           const tag = e.target && e.target.tagName;
@@ -693,6 +689,7 @@
         return () => window.removeEventListener("keydown", h);
       }, [phase, activePairId, sceneIdx, setTab, annos]);
 
+      // optional external config
       useEffect(() => {
         const url = getConfigParam();
         if (!url) return;
@@ -717,11 +714,12 @@
         return () => { cancelled = true; };
       }, []);
 
+      // ==== derive current scene + set safely
       const currentScene = study.scenes[sceneIdx];
-      const order = uiOrder[currentScene.sceneId] || [0, 1];
+      const order = (uiOrder[currentScene.sceneId] || [0, 1]);
       const setDef = currentScene.sets[order[setTab]];
-      const sceneAnno = annos[currentScene.sceneId];
-      const setAnno = sceneAnno.sets[setDef.setId];
+      const sceneAnno = (annos[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} });
+      const setAnno = (sceneAnno.sets[setDef.setId] || { setId: setDef.setId, noInconsistencies: false, pairs: [] });
 
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
@@ -740,63 +738,69 @@
       }
 
       function updateSetAnno(upd) {
-        setAnnos((prev) => ({
-          ...prev,
-          [currentScene.sceneId]: {
-            ...prev[currentScene.sceneId],
-            sets: {
-              ...prev[currentScene.sceneId].sets,
-              [setDef.setId]: upd,
+        setAnnos((prev) => {
+          const prevScene = prev[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} };
+          return {
+            ...prev,
+            [currentScene.sceneId]: {
+              ...prevScene,
+              sets: {
+                ...prevScene.sets,
+                [setDef.setId]: upd,
+              },
             },
-          },
-        }));
+          };
+        });
       }
 
       function newPair(color) {
-        const colorToUse = color || COLORS[setAnno.pairs.length % COLORS.length];
+        const colorToUse = color || COLORS[(setAnno.pairs || []).length % COLORS.length];
         const p = { pairId: uid(), color: colorToUse, label: "", visible: true, rects: [] };
-        updateSetAnno({ ...setAnno, noInconsistencies: false, pairs: [...setAnno.pairs, p] });
+        const nextPairs = (setAnno.pairs || []).concat([p]);
+        updateSetAnno({ ...setAnno, noInconsistencies: false, pairs: nextPairs });
         setActivePairId(p.pairId);
       }
 
       function deletePair(pairId) {
         if (!confirm("Delete this pair?")) return;
-        const next = setAnno.pairs.filter((p) => p.pairId !== pairId);
+        const next = (setAnno.pairs || []).filter((p) => p.pairId !== pairId);
         updateSetAnno({ ...setAnno, pairs: next });
         if (activePairId === pairId) setActivePairId(null);
       }
 
       function togglePair(pairId) {
-        const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
+        const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
         updateSetAnno({ ...setAnno, pairs: next });
       }
 
       function labelPair(pairId, label) {
-        const next = setAnno.pairs.map((p) => (p.pairId === pairId ? { ...p, label } : p));
+        const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, label } : p));
         updateSetAnno({ ...setAnno, pairs: next });
       }
 
       function handleFinishRect(pairId, rect) {
-        const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
+        const arr = (setAnno.pairs || []);
+        const idx = arr.findIndex((p) => p.pairId === pairId);
         if (idx < 0) return;
-        const p = setAnno.pairs[idx];
-        if (p.rects.length >= 2) return;
-        const updated = { ...p, rects: [...p.rects, rect] };
-        const arr = [...setAnno.pairs];
-        arr[idx] = updated;
-        updateSetAnno({ ...setAnno, pairs: arr });
+        const p = arr[idx];
+        if ((p.rects || []).length >= 2) return;
+        const updated = { ...p, rects: (p.rects || []).concat([rect]) };
+        const newArr = arr.slice();
+        newArr[idx] = updated;
+        updateSetAnno({ ...setAnno, pairs: newArr });
         if (updated.rects.length >= 2) setActivePairId(null);
       }
 
       function onUpdateRect(pairId, rectIndex, newRect) {
-        const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
+        const arr = (setAnno.pairs || []);
+        const idx = arr.findIndex((p) => p.pairId === pairId);
         if (idx < 0) return;
-        const p = setAnno.pairs[idx];
-        const rects = [...p.rects];
+        const p = arr[idx];
+        const rects = (p.rects || []).slice();
         rects[rectIndex] = newRect;
-        const arr = [...setAnno.pairs];
-        arr[idx] = { ...p, rects };
-        updateSetAnno({ ...setAnno, pairs: arr });
+        const newArr = arr.slice();
+        newArr[idx] = { ...p, rects };
+        updateSetAnno({ ...setAnno, pairs: newArr });
       }
 
       function onImport(json) {
@@ -823,21 +827,25 @@
         download(`${study.studyId}__results.json`, pretty(payload));
       }
 
+      // SAFE canProceedScene with guards for missing localStorage entries
       function canProceedScene(sceneIndex = sceneIdx) {
         const sc = study.scenes[sceneIndex];
+        const savedScene = annos[sc.sceneId];
+        if (!savedScene || !savedScene.sets) return false;
         const s0 = sc.sets[0];
         const s1 = sc.sets[1];
-        const a0 = annos[sc.sceneId].sets[s0.setId];
-        const a1 = annos[sc.sceneId].sets[s1.setId];
-        const ok = (a) => a.noInconsistencies || a.pairs.some((p) => p.rects.length === 2);
+        const a0 = savedScene.sets[s0.setId] || { noInconsistencies: false, pairs: [] };
+        const a1 = savedScene.sets[s1.setId] || { noInconsistencies: false, pairs: [] };
+        const ok = (a) => !!a && (a.noInconsistencies === true || (Array.isArray(a.pairs) && a.pairs.some((p) => Array.isArray(p.rects) && p.rects.length === 2)));
         return ok(a0) && ok(a1);
       }
 
       function allScenesComplete() {
+        if (!study || !Array.isArray(study.scenes)) return false;
         return study.scenes.every((_, i) => canProceedScene(i));
       }
 
-      function gotoNextScene(isLastScene) {
+      function gotoNextScene() {
         if (sceneIdx < study.scenes.length - 1) {
           setSceneIdx(sceneIdx + 1);
           setSetTab(0);
@@ -955,7 +963,7 @@
 
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold mr-3">
-                    Scene {sceneIdx + 1}: {currentScene.title}
+                    Scene {sceneIdx + 1}: {study.scenes[sceneIdx].title}
                   </div>
                   <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
                     {HIDDEN_SET_LABELS.map((name, i) => (
@@ -972,7 +980,7 @@
                   <div className="flex-1 w-full">
                     <SetViewer
                       setDef={setDef}
-                      anno={annos[currentScene.sceneId].sets[setDef.setId]}
+                      anno={setAnno}
                       activePairId={activePairId}
                       onFinishRect={handleFinishRect}
                       onStartDrawing={() => { if (!activePairId) newPair(); }}
@@ -980,7 +988,7 @@
                     />
                   </div>
                   <Sidebar
-                    setAnno={annos[currentScene.sceneId].sets[setDef.setId]}
+                    setAnno={setAnno}
                     onChange={(upd) => updateSetAnno(upd)}
                     onNewPair={(color) => newPair(color)}
                     onDeletePair={deletePair}
@@ -989,9 +997,8 @@
                     activePairId={activePairId}
                     setActivePairId={setActivePairId}
                     canFinishScene={canProceedScene()}
-                    onNextScene={(isLast) => gotoNextScene(isLast)}
+                    onNextScene={gotoNextScene}
                     onPrevScene={gotoPrevScene}
-                    isLastScene={sceneIdx === study.scenes.length - 1}
                   />
                 </div>
 
