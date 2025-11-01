@@ -35,7 +35,7 @@
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
-    // ======= SAMPLE DATA (kept for local dev; your URL config can still override) =======
+    // ======= SAMPLE DATA =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
@@ -87,7 +87,6 @@
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
 
-    // Hidden labels for raters (UI only)
     const HIDDEN_SET_LABELS = ["Set A", "Set B"];
     const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
 
@@ -131,11 +130,10 @@
     // ======= ImageBox with draw + move + resize (robust clamping) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
-      const [drag, setDrag] = React.useState(null); // drawing: {startX,startY,curX,curY}
+      const [drag, setDrag] = React.useState(null);
       const [imgDims, setImgDims] = React.useState({ naturalW: 1, naturalH: 1, clientW: 1, clientH: 1 });
 
-      // edit state for move/resize
-      const editRef = React.useRef(null); // { pairId, rectIndex(abs), mode:'move'|'resize', handle?, startRect, startClientX, startClientY }
+      const editRef = React.useRef(null);
 
       React.useEffect(() => {
         const el = ref.current;
@@ -171,9 +169,7 @@
         return { nx, ny, boxW: box.width, boxH: box.height };
       };
 
-      // DRAWING on background
       const onBackgroundMouseDown = (e) => {
-        // ignore clicks that start inside existing rects/handles
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
         if (!activePairId) return;
         if (onStartDrawing) onStartDrawing();
@@ -186,14 +182,12 @@
       };
 
       const onMouseMove = (e) => {
-        // drawing rubber-band
         if (drag) {
           const box = ref.current.getBoundingClientRect();
           const x = clamp(e.clientX - box.left, 0, box.width);
           const y = clamp(e.clientY - box.top, 0, box.height);
           setDrag((d) => ({ ...d, curX: x, curY: y }));
         }
-        // moving/resizing
         if (editRef.current) {
           const { nx, ny } = clientToNatural(e.clientX, e.clientY);
           const action = editRef.current;
@@ -201,8 +195,8 @@
 
           let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
           if (action.mode === 'move') {
-            const { nx: sx, ny: sy } = clientToNatural(action.startClientX, action.startClientY);
-            const dx = nx - sx, dy = ny - sy;
+            const start = clientToNatural(action.startClientX, action.startClientY);
+            const dx = nx - start.nx, dy = ny - start.ny;
             nx1 = clamp(r0.x + dx, 0, imgDims.naturalW - r0.w);
             ny1 = clamp(r0.y + dy, 0, imgDims.naturalH - r0.h);
           } else if (action.mode === 'resize') {
@@ -232,7 +226,6 @@
               nh = newBottom - r0.y;
             }
           }
-          // Final clamp to keep rect inside image
           nx1 = clamp(nx1, 0, imgDims.naturalW - 1);
           ny1 = clamp(ny1, 0, imgDims.naturalH - 1);
           nw  = clamp(nw,  1, imgDims.naturalW - nx1);
@@ -257,7 +250,6 @@
           const nw = (w / box.width)  * imgDims.naturalW;
           const nh = (h / box.height) * imgDims.naturalH;
 
-          // Clamp natural as well
           const nxC = clamp(nx, 0, imgDims.naturalW - 1);
           const nyC = clamp(ny, 0, imgDims.naturalH - 1);
           const nwC = clamp(nw, 1, imgDims.naturalW - nxC);
@@ -277,7 +269,6 @@
         return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
       };
 
-      // MOVE mousedown on rect
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
         e.preventDefault();
@@ -291,7 +282,6 @@
         };
       };
 
-      // RESIZE mousedown on corner handle
       const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
         e.stopPropagation();
         e.preventDefault();
@@ -367,7 +357,7 @@
                 top: Math.min(drag.startY, drag.curY),
                 width: Math.abs(drag.curX - drag.startX),
                 height: Math.abs(drag.curY - drag.startY),
-                borderColor: pairs.find((p) => p.pairId === activePairId)?.color || "#000",
+                borderColor: ((pairs.find((p) => p.pairId === activePairId) || {}).color) || "#000",
               }}
             />
           )}
@@ -482,7 +472,7 @@
       );
     }
 
-    // Practice panel used on the Instruction screen (sandboxed — not saved)
+    // Practice panel (no persistence)
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
@@ -494,10 +484,8 @@
         setActivePairId(p.pairId);
       };
       const onFinishRect = (pairId, rect) => {
-        // compute new length to know if we should keep active or clear
         const target = pairs.find((p) => p.pairId === pairId);
-        const newLen = (target?.rects.length || 0) + 1;
-
+        const newLen = ((target && target.rects ? target.rects.length : 0)) + 1;
         setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
         if (newLen >= 2) setActivePairId(null);
         else setActivePairId(pairId);
@@ -543,7 +531,7 @@
       );
     }
 
-    // Expanded, explicit instructions text
+    // Instructions
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
@@ -554,37 +542,17 @@
           </p>
 
           <ul className="list-disc ml-5 space-y-1">
-            <li>
-              <b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.
-            </li>
-            <li>
-              Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.
-            </li>
-            <li>
-              Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs;
-              logos/prints/texture change across views.
-            </li>
-            <li>
-              Please <b>mark all inconsistencies you can find</b> in each set.
-            </li>
-            <li>
-              Some sets may seem consistent at first glance but contain subtle issues on closer inspection.
-            </li>
-            <li>
-              Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes).
-              <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.
-            </li>
-            <li>
-              <b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b> to
-              look for inconsistencies. If none are found, mark <b>“No inconsistencies”</b> for that set.
-            </li>
+            <li><b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.</li>
+            <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.</li>
+            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs; logos/prints/texture change across views.</li>
+            <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
+            <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
+            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
+            <li><b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b>. If none are found, mark <b>“No inconsistencies”</b>.</li>
           </ul>
 
           <p>
-            An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing —
-            covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view over
-            the inconsistent region, then draw the matching rectangle on the corresponding view. Add as many pairs as
-            needed.
+            An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing — covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view, then draw the matching rectangle on the corresponding view.
           </p>
 
           {INTRO_VIDEO_URL && (
@@ -599,13 +567,12 @@
       );
     }
 
-    // Intro / Instructions screen shown before scenes
+    // Intro screen
     function IntroScreen({ study, raterId, setRaterId, onStart, onClearAll }) {
       return (
         <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
           <InstructionsPanel />
-
           <PracticePanel />
 
           <div className="flex items-center gap-3 my-4">
@@ -632,23 +599,15 @@
       );
     }
 
-    // Thank-you screen with restart + clear-all actions
+    // Thank-you screen
     function ThankYouScreen({ onRestart, onClearAll }) {
       return (
         <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
           <h1 className="text-2xl font-semibold mb-2">Thank you! 🎉</h1>
-          <p className="text-sm text-neutral-700 mb-6">
-            Your ratings were submitted successfully.
-          </p>
+          <p className="text-sm text-neutral-700 mb-6">Your ratings were submitted successfully.</p>
           <div className="flex items-center justify-center gap-3">
-            <button className="px-3 py-2 rounded-lg border" onClick={onRestart}>
-              Start over (keep data)
-            </button>
-            <button
-              className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200"
-              onClick={onClearAll}
-              title="Clears rater id, annotations, and randomized set order for this study"
-            >
+            <button className="px-3 py-2 rounded-lg border" onClick={onRestart}>Start over (keep data)</button>
+            <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={onClearAll} title="Clears rater id, annotations, and randomized set order for this study">
               Clear all data & restart
             </button>
           </div>
@@ -668,15 +627,11 @@
             </div>
             <div className="flex items-center gap-2">
               {phase === 'rate' && (
-                <button
-                  className="text-sm px-3 py-1.5 rounded-md border"
-                  onClick={() => setShowInstr((v) => !v)}
-                >
+                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => setShowInstr((v) => !v)}>
                   {showInstr ? "Hide instructions" : "Show instructions"}
                 </button>
               )}
-              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
-                    value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID" value={raterId} onChange={(e) => setRaterId(e.target.value)} />
               <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
               <button
                 className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
@@ -703,27 +658,21 @@
       const [configError, setConfigError] = useState(null);
       const [configSource, setConfigSource] = useState(null);
 
-      // phase: 'intro' | 'rate' | 'thanks'
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
 
-      // show/hide instructions during rating (default hidden)
       const [showInstr, setShowInstr] = useState(false);
 
-      // rater id (auto-generate if missing)
       const [raterId, setRaterId] = useState(() => {
         const saved = localStorage.getItem('mv3d_rater_id');
         return saved && saved.trim() ? saved : randomRaterId();
       });
 
-      // per-scene randomized UI order mapping
       const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
 
-      // persist annos, rater id, phase
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // keyboard shortcuts — DO NOT fire when typing in inputs/textarea/contentEditable
       useEffect(() => {
         const h = (e) => {
           const tag = e.target && e.target.tagName;
@@ -744,7 +693,6 @@
         return () => window.removeEventListener("keydown", h);
       }, [phase, activePairId, sceneIdx, setTab, annos]);
 
-      // auto-load config from ?config=...
       useEffect(() => {
         const url = getConfigParam();
         if (!url) return;
@@ -770,8 +718,8 @@
       }, []);
 
       const currentScene = study.scenes[sceneIdx];
-      const order = uiOrder[currentScene.sceneId] || [0, 1]; // randomized mapping of [0,1]
-      const setDef = currentScene.sets[order[setTab]];       // pick the actual set by randomized order
+      const order = uiOrder[currentScene.sceneId] || [0, 1];
+      const setDef = currentScene.sets[order[setTab]];
       const sceneAnno = annos[currentScene.sceneId];
       const setAnno = sceneAnno.sets[setDef.setId];
 
@@ -832,7 +780,7 @@
         const idx = setAnno.pairs.findIndex((p) => p.pairId === pairId);
         if (idx < 0) return;
         const p = setAnno.pairs[idx];
-        if (p.rects.length >= 2) return; // enforce pair of 2
+        if (p.rects.length >= 2) return;
         const updated = { ...p, rects: [...p.rects, rect] };
         const arr = [...setAnno.pairs];
         arr[idx] = updated;
@@ -858,7 +806,7 @@
           setSceneIdx(0);
           setSetTab(0);
           setActivePairId(null);
-          setUiOrder(buildOrLoadUiOrder(json)); // rebuild randomization for imported study
+          setUiOrder(buildOrLoadUiOrder(json));
         } else if (json && json.studyId && typeof json === "object") {
           if (json.annos) setAnnos(json.annos);
           if (json.study) {
@@ -877,14 +825,14 @@
 
       function canProceedScene(sceneIndex = sceneIdx) {
         const sc = study.scenes[sceneIndex];
-        const [s0, s1] = sc.sets;
+        const s0 = sc.sets[0];
+        const s1 = sc.sets[1];
         const a0 = annos[sc.sceneId].sets[s0.setId];
         const a1 = annos[sc.sceneId].sets[s1.setId];
         const ok = (a) => a.noInconsistencies || a.pairs.some((p) => p.rects.length === 2);
         return ok(a0) && ok(a1);
       }
 
-      // All scenes done?
       function allScenesComplete() {
         return study.scenes.every((_, i) => canProceedScene(i));
       }
@@ -924,7 +872,7 @@
             hiddenSetLabels: HIDDEN_SET_LABELS
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
-          setPhase('thanks'); // Thank-you screen
+          setPhase('thanks');
         } catch (err) {
           console.error('Submission failed:', err);
           alert('Submission failed. See console.');
@@ -972,7 +920,6 @@
           />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
-            {/* Config load status */}
             {loadingConfig && (
               <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
                 Loading study config from URL…
@@ -1006,7 +953,6 @@
               <>
                 {showInstr && <InstructionsPanel />}
 
-                {/* Scene header & tabs */}
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold mr-3">
                     Scene {sceneIdx + 1}: {currentScene.title}
