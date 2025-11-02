@@ -4,12 +4,9 @@
     <meta charset="utf-8" />
     <title>3D Consistency Rater</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- Tailwind (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React 18 + ReactDOM (UMD) -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <!-- Babel to transpile JSX in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
       html, body, #root { height: 100%; }
@@ -125,70 +122,60 @@
       el.remove();
     }
 
-    // ======= ImageBox (live rect conversions; fixes shrinking/jumping) =======
+    // ======= ImageBox (normalized rects; live client rect) =======
+    // Rect shape we store: { xf, yf, wf, hf, imageIndex }  (all in 0..1)
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
       const imgRef = React.useRef(null);
 
       const [drag, setDrag] = React.useState(null); // {startX,startY,curX,curY,pairId}
-      const [imgState, setImgState] = React.useState({
-        naturalW: 1, naturalH: 1, ready: false
-      });
+      const [ready, setReady] = React.useState(false);
       const editRef = React.useRef(null);
 
-      // measure only the NATURAL size & "ready"; use live DOM rect for client coords
-      const measure = React.useCallback(() => {
+      const measureReady = React.useCallback(() => {
         const img = imgRef.current;
         if (!img) return;
-        const naturalW = img.naturalWidth || 1;
-        const naturalH = img.naturalHeight || 1;
-        const ready = img.complete && naturalW > 1 && naturalH > 1;
-        setImgState({ naturalW, naturalH, ready });
+        const ok = img.complete && (img.naturalWidth||0) > 1 && (img.naturalHeight||0) > 1;
+        setReady(ok);
       }, []);
 
       React.useEffect(() => {
-        measure();
-        const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+        measureReady();
+        const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureReady) : null;
         if (ro && ref.current) ro.observe(ref.current);
-        window.addEventListener("resize", measure);
+        window.addEventListener("resize", measureReady);
         const img = imgRef.current;
-        const onLoad = () => measure();
+        const onLoad = () => measureReady();
         if (img) img.addEventListener("load", onLoad);
         return () => {
           if (ro && ref.current) ro.disconnect();
-          window.removeEventListener("resize", measure);
+          window.removeEventListener("resize", measureReady);
           if (img) img.removeEventListener("load", onLoad);
         };
-      }, [src, measure]);
+      }, [src, measureReady]);
 
-      // Get up-to-date client rect every time (handles scroll/zoom/layout changes mid-drag)
-      const getLiveClientRect = () => {
+      const liveRect = () => {
         const r = imgRef.current?.getBoundingClientRect();
-        return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : { left: 0, top: 0, width: 1, height: 1 };
+        return r ? { left: r.left, top: r.top, w: r.width || 1, h: r.height || 1 } : { left: 0, top: 0, w: 1, h: 1 };
       };
 
-      const clientToNatural = (clientX, clientY) => {
-        const { naturalW, naturalH } = imgState;
-        const { left, top, width: clientW, height: clientH } = getLiveClientRect();
-        const x = clamp(clientX - left, 0, clientW);
-        const y = clamp(clientY - top, 0, clientH);
-        const nx = (x / clientW) * naturalW;
-        const ny = (y / clientH) * naturalH;
-        return { nx, ny, x, y, left, top, clientW, clientH };
+      const clientToFrac = (clientX, clientY) => {
+        const { left, top, w, h } = liveRect();
+        const x = clamp(clientX - left, 0, w);
+        const y = clamp(clientY - top, 0, h);
+        return { fx: x / w, fy: y / h, x, y, left, top, w, h };
       };
 
       const onBackgroundMouseDown = (e) => {
-        if (!imgState.ready) return;
+        if (!ready) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
         let pairId = activePairId;
-        if (!pairId && typeof onStartDrawing === 'function') {
-          pairId = onStartDrawing() || null;
-        }
+        if (!pairId && typeof onStartDrawing === 'function') pairId = onStartDrawing() || null;
         if (!pairId) return;
 
-        const { left, top, clientW, clientH } = clientToNatural(e.clientX, e.clientY);
-        const inside = e.clientX >= left && e.clientX <= left + clientW && e.clientY >= top && e.clientY <= top + clientH;
+        const { left, top, w, h } = liveRect();
+        const inside = e.clientX >= left && e.clientX <= left + w && e.clientY >= top && e.clientY <= top + h;
         if (!inside) return;
 
         setDrag({ startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId });
@@ -201,72 +188,69 @@
         if (drag) setDrag((d) => ({ ...d, curX: e.clientX, curY: e.clientY }));
 
         if (editRef.current) {
-          const { nx, ny } = clientToNatural(e.clientX, e.clientY);
+          const { fx, fy } = clientToFrac(e.clientX, e.clientY);
           const action = editRef.current;
           const r0 = action.startRect;
 
-          let nx1 = r0.x, ny1 = r0.y, nw = r0.w, nh = r0.h;
-          const minSize = 8;
+          let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
+          const minF = 8 / Math.max(liveRect().w, liveRect().h); // ~8px in fraction
           if (action.mode === 'move') {
-            const start = clientToNatural(action.startClientX, action.startClientY);
-            nx1 = clamp(r0.x + (nx - start.nx), 0, imgState.naturalW - r0.w);
-            ny1 = clamp(r0.y + (ny - start.ny), 0, imgState.naturalH - r0.h);
+            const start = clientToFrac(action.startClientX, action.startClientY);
+            xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
+            yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
           } else {
-            const right = r0.x + r0.w;
-            const bottom = r0.y + r0.h;
+            const right = r0.xf + r0.wf;
+            const bottom = r0.yf + r0.hf;
             if (action.handle === 'nw') {
-              nx1 = clamp(nx, 0, right - minSize);
-              ny1 = clamp(ny, 0, bottom - minSize);
-              nw = right - nx1; nh = bottom - ny1;
+              xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF);
+              wf = right - xf; hf = bottom - yf;
             } else if (action.handle === 'ne') {
-              nx1 = r0.x;
-              const newRight = clamp(nx, r0.x + minSize, imgState.naturalW);
-              nw = newRight - r0.x;
-              ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
+              xf = r0.xf;
+              const newRight = clamp(fx, r0.xf + minF, 1);
+              wf = newRight - r0.xf;
+              yf = clamp(fy, 0, bottom - minF); hf = bottom - yf;
             } else if (action.handle === 'sw') {
-              ny1 = r0.y;
-              const newBottom = clamp(ny, r0.y + minSize, imgState.naturalH);
-              nh = newBottom - r0.y;
-              nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
+              yf = r0.yf;
+              const newBottom = clamp(fy, r0.yf + minF, 1);
+              hf = newBottom - r0.yf;
+              xf = clamp(fx, 0, right - minF); wf = right - xf;
             } else if (action.handle === 'se') {
-              nx1 = r0.x; ny1 = r0.y;
-              const newRight = clamp(nx, r0.x + minSize, imgState.naturalW);
-              const newBottom = clamp(ny, r0.y + minSize, imgState.naturalH);
-              nw = newRight - r0.x; nh = newBottom - r0.y;
+              xf = r0.xf; yf = r0.yf;
+              const newRight = clamp(fx, r0.xf + minF, 1);
+              const newBottom = clamp(fy, r0.yf + minF, 1);
+              wf = newRight - r0.xf; hf = newBottom - r0.yf;
             }
           }
-          nx1 = clamp(nx1, 0, imgState.naturalW - 1);
-          ny1 = clamp(ny1, 0, imgState.naturalH - 1);
-          nw  = clamp(nw,  1, imgState.naturalW - nx1);
-          nh  = clamp(nh,  1, imgState.naturalH - ny1);
-          onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { x: nx1, y: ny1, w: nw, h: nh, imageIndex });
+          xf = clamp(xf, 0, 1 - 1e-6);
+          yf = clamp(yf, 0, 1 - 1e-6);
+          wf = clamp(wf, 1e-6, 1 - xf);
+          hf = clamp(hf, 1e-6, 1 - yf);
+          onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
         }
       };
 
       const onWindowMouseUp = () => {
         if (drag) {
           const { startX, startY, curX, curY, pairId } = drag;
-          const a = clientToNatural(Math.min(startX, curX), Math.min(startY, curY));
-          const b = clientToNatural(Math.max(startX, curX), Math.max(startY, curY));
-          const nx = clamp(a.nx, 0, imgState.naturalW - 1);
-          const ny = clamp(a.ny, 0, imgState.naturalH - 1);
-          const nw = clamp(b.nx - a.nx, 1, imgState.naturalW - nx);
-          const nh = clamp(b.ny - a.ny, 1, imgState.naturalH - ny);
-          onFinishRect && onFinishRect(pairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
+          const a = clientToFrac(Math.min(startX, curX), Math.min(startY, curY));
+          const b = clientToFrac(Math.max(startX, curX), Math.max(startY, curY));
+          const xf = clamp(a.fx, 0, 1 - 1e-6);
+          const yf = clamp(a.fy, 0, 1 - 1e-6);
+          const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
+          const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+          onFinishRect && onFinishRect(pairId, { xf, yf, wf, hf, imageIndex });
           setDrag(null);
         }
         editRef.current = null;
         window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
-      // NATURAL -> CSS %
-      const toClientStyle = (r) => {
-        const bx = r.x / imgState.naturalW;
-        const by = r.y / imgState.naturalH;
-        const bw = r.w / imgState.naturalW;
-        const bh = r.h / imgState.naturalH;
-        return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
-      };
+      const toClientStyle = (r) => ({
+        left: `${r.xf * 100}%`,
+        top: `${r.yf * 100}%`,
+        width: `${r.wf * 100}%`,
+        height: `${r.hf * 100}%`,
+      });
 
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
@@ -295,7 +279,6 @@
           .map((r, absIndex) => ({ r, absIndex }))
           .filter(({ r }) => r.imageIndex === imageIndex);
 
-      // Draft overlay uses a live rect (no cached left/top)
       const draftBox = drag ? (() => {
         const r = imgRef.current?.getBoundingClientRect();
         if (!r) return null;
@@ -311,7 +294,7 @@
           ref={ref}
           onMouseDown={onBackgroundMouseDown}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
-          title={imgState.ready ? "Click-drag to draw a rectangle" : "Loading image…"}
+          title={ready ? "Click-drag to draw a rectangle" : "Loading image…"}
         >
           <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
@@ -480,7 +463,7 @@
         const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
         setPairs((arr) => [...arr, p]);
         setActivePairId(p.pairId);
-        return p.pairId; // allow ImageBox to draw immediately
+        return p.pairId;
       };
       const onStartDrawing = () => activePairId || newPair();
       const onFinishRect = (pairId, rect) => {
@@ -531,7 +514,6 @@
       );
     }
 
-    // Instructions
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
@@ -540,54 +522,34 @@
             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
             <b> inconsistencies between images within the same set</b>.
           </p>
-
           <ul className="list-disc ml-5 space-y-1">
-            <li><b>Ignore preference and image quality.</b> Do <b>not</b> consider which image looks nicer or sharper.</li>
-            <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.</li>
-            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs; logos/prints/texture change across views.</li>
-            <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
-            <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
-            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> — please mark them too.</li>
-            <li><b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b>. If none are found, mark <b>“No inconsistencies”</b>.</li>
+            <li><b>Ignore preference and image quality.</b></li>
+            <li>Focus only on <b>3D consistency</b>.</li>
+            <li>Mark all inconsistencies you can find.</li>
           </ul>
-
-          <p>
-            An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing — covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view, then draw the matching rectangle on the corresponding view.
-          </p>
-
           {INTRO_VIDEO_URL && (
             <div className="mt-2">
               <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
-              <div className="text-xs text-neutral-500 mt-1">
-                The video shows an example of how to mark inconsistencies between two views.
-              </div>
             </div>
           )}
         </div>
       );
     }
 
-    // Intro screen
     function IntroScreen({ study, raterId, setRaterId, onStart, onClearAll }) {
       return (
         <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
           <InstructionsPanel />
           <PracticePanel />
-
           <div className="flex items-center gap-3 my-4">
             <label className="text-sm w-24">Rater ID</label>
-            <input
-              className="flex-1 text-sm px-3 py-2 rounded-md border"
-              placeholder="e.g., r-8f4k-27"
-              value={raterId}
-              onChange={(e) => setRaterId(e.target.value)}
-            />
-            <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())}>
+            <input className="flex-1 text-sm px-3 py-2 rounded-md border"
+              placeholder="e.g., r-8f4k-27" value={raterId} onChange={(e)=>setRaterId(e.target.value)} />
+            <button className="text-sm px-3 py-2 rounded-md border" onClick={()=>setRaterId(randomRaterId())}>
               Randomize
             </button>
           </div>
-
           <div className="flex items-center justify-between">
             <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
             <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
@@ -599,7 +561,6 @@
       );
     }
 
-    // Thank-you screen
     function ThankYouScreen({ onRestart, onClearAll }) {
       return (
         <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
@@ -607,7 +568,7 @@
           <p className="text-sm text-neutral-700 mb-6">Your ratings were submitted successfully.</p>
           <div className="flex items-center justify-center gap-3">
             <button className="px-3 py-2 rounded-lg border" onClick={onRestart}>Start over (keep data)</button>
-            <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={onClearAll} title="Clears rater id, annotations, and randomized set order for this study">
+            <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={onClearAll}>
               Clear all data & restart
             </button>
           </div>
@@ -615,7 +576,6 @@
       );
     }
 
-    // Header
     function HeaderBar({ phase, study, progressText, raterId, setRaterId, onSubmit, onClearAll, showInstr, setShowInstr, canSubmit }) {
       return (
         <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
@@ -631,13 +591,13 @@
                   {showInstr ? "Hide instructions" : "Show instructions"}
                 </button>
               )}
-              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID" value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID"
+                     value={raterId} onChange={(e)=>setRaterId(e.target.value)} />
               <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
               <button
                 className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
                 disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
                 onClick={onSubmit}
-                title={!canSubmit ? "Complete all scenes to enable Submit." : (ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet")}
               >
                 Submit
               </button>
@@ -670,28 +630,6 @@
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // keyboard shortcuts
-      useEffect(() => {
-        const h = (e) => {
-          const tag = e.target && e.target.tagName;
-          const isTyping = (tag === 'INPUT' || tag === 'TEXTAREA') || (e.target && e.target.isContentEditable);
-          if (isTyping) return;
-
-          if (e.key === "n" || e.key === "N") {
-            e.preventDefault();
-            if (phase === 'rate') newPair();
-          } else if (e.key === "Backspace") {
-            if (phase === 'rate' && activePairId) {
-              e.preventDefault();
-              deletePair(activePairId);
-            }
-          }
-        };
-        window.addEventListener("keydown", h);
-        return () => window.removeEventListener("keydown", h);
-      }, [phase, activePairId, sceneIdx, setTab, annos]);
-
-      // optional external config
       useEffect(() => {
         const url = getConfigParam();
         if (!url) return;
@@ -716,7 +654,6 @@
         return () => { cancelled = true; };
       }, []);
 
-      // ==== derive current scene + set safely
       const currentScene = study.scenes[sceneIdx];
       const order = (uiOrder[currentScene.sceneId] || [0, 1]);
       const setDef = currentScene.sets[order[setTab]];
@@ -755,7 +692,6 @@
         });
       }
 
-      // create pair utils
       function newPairGetId(color) {
         const colorToUse = color || COLORS[(setAnno.pairs || []).length % COLORS.length];
         const p = { pairId: uid(), color: colorToUse, label: "", visible: true, rects: [] };
@@ -772,12 +708,10 @@
         updateSetAnno({ ...setAnno, pairs: next });
         if (activePairId === pairId) setActivePairId(null);
       }
-
       function togglePair(pairId) {
         const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
         updateSetAnno({ ...setAnno, pairs: next });
       }
-
       function labelPair(pairId, label) {
         const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, label } : p));
         updateSetAnno({ ...setAnno, pairs: next });
@@ -785,13 +719,13 @@
 
       function handleFinishRect(pairId, rect) {
         const arr = (setAnno.pairs || []);
-        theIdx = arr.findIndex((p) => p.pairId === pairId);
-        if (theIdx < 0) return;
-        const p = arr[theIdx];
+        const idx = arr.findIndex((p) => p.pairId === pairId);
+        if (idx < 0) return;
+        const p = arr[idx];
         if ((p.rects || []).length >= 2) return;
         const updated = { ...p, rects: (p.rects || []).concat([rect]) };
         const newArr = arr.slice();
-        newArr[theIdx] = updated;
+        newArr[idx] = updated;
         updateSetAnno({ ...setAnno, pairs: newArr });
         if (updated.rects.length >= 2) setActivePairId(null);
       }
@@ -915,7 +849,6 @@
         : (phase === 'thanks' ? `Submitted` : `Instructions`);
 
       const canSubmit = allScenesComplete();
-
       const onStartDrawing = () => activePairId || newPairGetId();
 
       return (
@@ -1021,9 +954,8 @@
       );
     }
 
-    // Mount
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
-  </script>
+    </script>
   </body>
 </html>
