@@ -27,7 +27,6 @@
   <body>
     <div id="root"></div>
 
-    <!-- The entire app -->
     <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useState } = React;
 
@@ -126,28 +125,25 @@
       el.remove();
     }
 
-    // ======= ImageBox (letterbox-safe + global drag, prevents "dot" bug) =======
+    // ======= ImageBox (live rect conversions; fixes shrinking/jumping) =======
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
       const imgRef = React.useRef(null);
 
-      // drag state includes the pair we draw into
       const [drag, setDrag] = React.useState(null); // {startX,startY,curX,curY,pairId}
-      const [imgDims, setImgDims] = React.useState({
-        naturalW: 1, naturalH: 1, clientW: 1, clientH: 1, left: 0, top: 0, ready: false
+      const [imgState, setImgState] = React.useState({
+        naturalW: 1, naturalH: 1, ready: false
       });
       const editRef = React.useRef(null);
 
+      // measure only the NATURAL size & "ready"; use live DOM rect for client coords
       const measure = React.useCallback(() => {
         const img = imgRef.current;
         if (!img) return;
-        const r = img.getBoundingClientRect();
         const naturalW = img.naturalWidth || 1;
         const naturalH = img.naturalHeight || 1;
-        const clientW = r.width || 1;
-        const clientH = r.height || 1;
-        const ready = img.complete && naturalW > 1 && naturalH > 1 && clientW > 1 && clientH > 1;
-        setImgDims({ naturalW, naturalH, clientW, clientH, left: r.left || 0, top: r.top || 0, ready });
+        const ready = img.complete && naturalW > 1 && naturalH > 1;
+        setImgState({ naturalW, naturalH, ready });
       }, []);
 
       React.useEffect(() => {
@@ -165,30 +161,34 @@
         };
       }, [src, measure]);
 
+      // Get up-to-date client rect every time (handles scroll/zoom/layout changes mid-drag)
+      const getLiveClientRect = () => {
+        const r = imgRef.current?.getBoundingClientRect();
+        return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : { left: 0, top: 0, width: 1, height: 1 };
+      };
+
       const clientToNatural = (clientX, clientY) => {
-        const { left, top, clientW, clientH, naturalW, naturalH } = imgDims;
+        const { naturalW, naturalH } = imgState;
+        const { left, top, width: clientW, height: clientH } = getLiveClientRect();
         const x = clamp(clientX - left, 0, clientW);
         const y = clamp(clientY - top, 0, clientH);
         const nx = (x / clientW) * naturalW;
         const ny = (y / clientH) * naturalH;
-        return { nx, ny, x, y };
+        return { nx, ny, x, y, left, top, clientW, clientH };
       };
 
       const onBackgroundMouseDown = (e) => {
-        if (!imgDims.ready) return; // prevent 1×1 rectangles before measuring
+        if (!imgState.ready) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
-        // ensure we have a pair (create one if needed)
         let pairId = activePairId;
         if (!pairId && typeof onStartDrawing === 'function') {
           pairId = onStartDrawing() || null;
         }
         if (!pairId) return;
 
-        const { left, top, clientW, clientH } = imgDims;
-        const inside =
-          e.clientX >= left && e.clientX <= left + clientW &&
-          e.clientY >= top  && e.clientY <= top  + clientH;
+        const { left, top, clientW, clientH } = clientToNatural(e.clientX, e.clientY);
+        const inside = e.clientX >= left && e.clientX <= left + clientW && e.clientY >= top && e.clientY <= top + clientH;
         if (!inside) return;
 
         setDrag({ startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId });
@@ -209,8 +209,8 @@
           const minSize = 8;
           if (action.mode === 'move') {
             const start = clientToNatural(action.startClientX, action.startClientY);
-            nx1 = clamp(r0.x + (nx - start.nx), 0, imgDims.naturalW - r0.w);
-            ny1 = clamp(r0.y + (ny - start.ny), 0, imgDims.naturalH - r0.h);
+            nx1 = clamp(r0.x + (nx - start.nx), 0, imgState.naturalW - r0.w);
+            ny1 = clamp(r0.y + (ny - start.ny), 0, imgState.naturalH - r0.h);
           } else {
             const right = r0.x + r0.w;
             const bottom = r0.y + r0.h;
@@ -220,25 +220,25 @@
               nw = right - nx1; nh = bottom - ny1;
             } else if (action.handle === 'ne') {
               nx1 = r0.x;
-              const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
+              const newRight = clamp(nx, r0.x + minSize, imgState.naturalW);
               nw = newRight - r0.x;
               ny1 = clamp(ny, 0, bottom - minSize); nh = bottom - ny1;
             } else if (action.handle === 'sw') {
               ny1 = r0.y;
-              const newBottom = clamp(ny, r0.y + minSize, imgDims.naturalH);
+              const newBottom = clamp(ny, r0.y + minSize, imgState.naturalH);
               nh = newBottom - r0.y;
               nx1 = clamp(nx, 0, right - minSize); nw = right - nx1;
             } else if (action.handle === 'se') {
               nx1 = r0.x; ny1 = r0.y;
-              const newRight = clamp(nx, r0.x + minSize, imgDims.naturalW);
-              const newBottom = clamp(ny, r0.y + minSize, imgDims.naturalH);
+              const newRight = clamp(nx, r0.x + minSize, imgState.naturalW);
+              const newBottom = clamp(ny, r0.y + minSize, imgState.naturalH);
               nw = newRight - r0.x; nh = newBottom - r0.y;
             }
           }
-          nx1 = clamp(nx1, 0, imgDims.naturalW - 1);
-          ny1 = clamp(ny1, 0, imgDims.naturalH - 1);
-          nw  = clamp(nw,  1, imgDims.naturalW - nx1);
-          nh  = clamp(nh,  1, imgDims.naturalH - ny1);
+          nx1 = clamp(nx1, 0, imgState.naturalW - 1);
+          ny1 = clamp(ny1, 0, imgState.naturalH - 1);
+          nw  = clamp(nw,  1, imgState.naturalW - nx1);
+          nh  = clamp(nh,  1, imgState.naturalH - ny1);
           onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { x: nx1, y: ny1, w: nw, h: nh, imageIndex });
         }
       };
@@ -248,10 +248,10 @@
           const { startX, startY, curX, curY, pairId } = drag;
           const a = clientToNatural(Math.min(startX, curX), Math.min(startY, curY));
           const b = clientToNatural(Math.max(startX, curX), Math.max(startY, curY));
-          const nx = clamp(a.nx, 0, imgDims.naturalW - 1);
-          const ny = clamp(a.ny, 0, imgDims.naturalH - 1);
-          const nw = clamp(b.nx - a.nx, 1, imgDims.naturalW - nx);
-          const nh = clamp(b.ny - a.ny, 1, imgDims.naturalH - ny);
+          const nx = clamp(a.nx, 0, imgState.naturalW - 1);
+          const ny = clamp(a.ny, 0, imgState.naturalH - 1);
+          const nw = clamp(b.nx - a.nx, 1, imgState.naturalW - nx);
+          const nh = clamp(b.ny - a.ny, 1, imgState.naturalH - ny);
           onFinishRect && onFinishRect(pairId, { x: nx, y: ny, w: nw, h: nh, imageIndex });
           setDrag(null);
         }
@@ -259,11 +259,12 @@
         window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
+      // NATURAL -> CSS %
       const toClientStyle = (r) => {
-        const bx = r.x / imgDims.naturalW;
-        const by = r.y / imgDims.naturalH;
-        const bw = r.w / imgDims.naturalW;
-        const bh = r.h / imgDims.naturalH;
+        const bx = r.x / imgState.naturalW;
+        const by = r.y / imgState.naturalH;
+        const bw = r.w / imgState.naturalW;
+        const bh = r.h / imgState.naturalH;
         return { left: `${bx * 100}%`, top: `${by * 100}%`, width: `${bw * 100}%`, height: `${bh * 100}%` };
       };
 
@@ -294,10 +295,12 @@
           .map((r, absIndex) => ({ r, absIndex }))
           .filter(({ r }) => r.imageIndex === imageIndex);
 
+      // Draft overlay uses a live rect (no cached left/top)
       const draftBox = drag ? (() => {
-        const { left, top } = imgDims;
-        const x = Math.min(drag.startX, drag.curX) - left;
-        const y = Math.min(drag.startY, drag.curY) - top;
+        const r = imgRef.current?.getBoundingClientRect();
+        if (!r) return null;
+        const x = Math.min(drag.startX, drag.curX) - r.left;
+        const y = Math.min(drag.startY, drag.curY) - r.top;
         const w = Math.abs(drag.curX - drag.startX);
         const h = Math.abs(drag.curY - drag.startY);
         return { x: Math.max(0, x), y: Math.max(0, y), w, h };
@@ -308,7 +311,7 @@
           ref={ref}
           onMouseDown={onBackgroundMouseDown}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
-          title={imgDims.ready ? "Click-drag to draw a rectangle" : "Loading image…"}
+          title={imgState.ready ? "Click-drag to draw a rectangle" : "Loading image…"}
         >
           <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
@@ -477,11 +480,9 @@
         const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
         setPairs((arr) => [...arr, p]);
         setActivePairId(p.pairId);
-        return p.pairId; // return id so ImageBox can draw immediately
+        return p.pairId; // allow ImageBox to draw immediately
       };
-      const onStartDrawing = () => {
-        return activePairId || newPair();
-      };
+      const onStartDrawing = () => activePairId || newPair();
       const onFinishRect = (pairId, rect) => {
         const target = pairs.find((p) => p.pairId === pairId);
         const existing = target ? target.rects.length : 0;
@@ -546,7 +547,7 @@
             <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; eye color differs; logos/prints/texture change across views.</li>
             <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
             <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
-            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
+            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> — please mark them too.</li>
             <li><b>It is also possible that the set is consistent.</b> Please invest <b>at least 20 seconds per set</b>. If none are found, mark <b>“No inconsistencies”</b>.</li>
           </ul>
 
@@ -784,13 +785,13 @@
 
       function handleFinishRect(pairId, rect) {
         const arr = (setAnno.pairs || []);
-        const idx = arr.findIndex((p) => p.pairId === pairId);
-        if (idx < 0) return;
-        const p = arr[idx];
+        theIdx = arr.findIndex((p) => p.pairId === pairId);
+        if (theIdx < 0) return;
+        const p = arr[theIdx];
         if ((p.rects || []).length >= 2) return;
         const updated = { ...p, rects: (p.rects || []).concat([rect]) };
         const newArr = arr.slice();
-        newArr[idx] = updated;
+        newArr[theIdx] = updated;
         updateSetAnno({ ...setAnno, pairs: newArr });
         if (updated.rects.length >= 2) setActivePairId(null);
       }
@@ -831,7 +832,6 @@
         download(`${study.studyId}__results.json`, pretty(payload));
       }
 
-      // canProceedScene safe
       function canProceedScene(sceneIndex = sceneIdx) {
         const sc = study.scenes[sceneIndex];
         const savedScene = annos[sc.sceneId];
@@ -916,7 +916,6 @@
 
       const canSubmit = allScenesComplete();
 
-      // this returns a pair id for ImageBox
       const onStartDrawing = () => activePairId || newPairGetId();
 
       return (
@@ -1026,6 +1025,5 @@
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
-
   </body>
 </html>
