@@ -4,10 +4,14 @@
     <meta charset="utf-8" />
     <title>3D Consistency Rater</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React 18 + ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
     <style>
       html, body, #root { height: 100%; }
       body { margin: 0; background: #fafafa; }
@@ -122,7 +126,7 @@
       el.remove();
     }
 
-    // ======= ImageBox (normalized rects; live client rect) =======
+    // ======= ImageBox (handles legacy pixel rects; stores fractional rects) =======
     // Rect shape we store: { xf, yf, wf, hf, imageIndex }  (all in 0..1)
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
@@ -166,6 +170,21 @@
         return { fx: x / w, fy: y / h, x, y, left, top, w, h };
       };
 
+      // Convert a rect to fractional coords (handles legacy {x,y,w,h})
+      const normalizeRect = (r) => {
+        if (!r) return r;
+        if ('xf' in r && 'wf' in r) return r; // already fractional
+        // legacy: natural pixel coords
+        const img = imgRef.current;
+        const natW = Math.max(1, img?.naturalWidth || 1);
+        const natH = Math.max(1, img?.naturalHeight || 1);
+        const xf = clamp((r.x || 0) / natW, 0, 1 - 1e-6);
+        const yf = clamp((r.y || 0) / natH, 0, 1 - 1e-6);
+        const wf = clamp((r.w || 0) / natW, 1e-6, 1 - xf);
+        const hf = clamp((r.h || 0) / natH, 1e-6, 1 - yf);
+        return { xf, yf, wf, hf, imageIndex: r.imageIndex ?? imageIndex };
+      };
+
       const onBackgroundMouseDown = (e) => {
         if (!ready) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
@@ -190,7 +209,7 @@
         if (editRef.current) {
           const { fx, fy } = clientToFrac(e.clientX, e.clientY);
           const action = editRef.current;
-          const r0 = action.startRect;
+          const r0 = normalizeRect(action.startRect);
 
           let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
           const minF = 8 / Math.max(liveRect().w, liveRect().h); // ~8px in fraction
@@ -218,6 +237,7 @@
               xf = r0.xf; yf = r0.yf;
               const newRight = clamp(fx, r0.xf + minF, 1);
               const newBottom = clamp(fy, r0.yf + minF, 1);
+              wf = newRight - r0.yf + (r0.yf - r0.yf); // keep hf compute below
               wf = newRight - r0.xf; hf = newBottom - r0.yf;
             }
           }
@@ -245,12 +265,15 @@
         window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
-      const toClientStyle = (r) => ({
-        left: `${r.xf * 100}%`,
-        top: `${r.yf * 100}%`,
-        width: `${r.wf * 100}%`,
-        height: `${r.hf * 100}%`,
-      });
+      const toClientStyle = (r) => {
+        const n = normalizeRect(r);
+        return {
+          left: `${n.xf * 100}%`,
+          top: `${n.yf * 100}%`,
+          width: `${n.wf * 100}%`,
+          height: `${n.hf * 100}%`,
+        };
+      };
 
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
@@ -279,6 +302,16 @@
           .map((r, absIndex) => ({ r, absIndex }))
           .filter(({ r }) => r.imageIndex === imageIndex);
 
+      // Draw-time migration: if we see a legacy rect, convert & persist
+      const maybeMigrateRect = (pairId, absIndex, r) => {
+        if (r && !('xf' in r)) {
+          const n = normalizeRect(r);
+          onUpdateRect && onUpdateRect(pairId, absIndex, n);
+          return n;
+        }
+        return r;
+      };
+
       const draftBox = drag ? (() => {
         const r = imgRef.current?.getBoundingClientRect();
         if (!r) return null;
@@ -300,31 +333,32 @@
 
           {pairs.map((p) =>
             rectsForThisImage(p).map(({ r, absIndex }) => {
+              const rect = maybeMigrateRect(p.pairId, absIndex, r);
               const color = p.color;
               return (
                 <div
                   key={p.pairId + '-' + absIndex}
                   className="absolute box-border anno-rect"
                   style={{
-                    ...toClientStyle(r),
+                    ...toClientStyle(rect),
                     border: `3px solid ${color}`,
                     borderRadius: 8,
                     color,
                     background: p.pairId === activePairId ? `${color}22` : "transparent",
                   }}
-                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
+                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, rect)}
                 >
                   <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: color }}>
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
                   <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'nw')}></div>
                   <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'ne')}></div>
                   <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'sw')}></div>
                   <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'se')}></div>
                 </div>
               );
             })
@@ -517,13 +551,9 @@
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
-          <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows <b>the same moment in time </b>
-            captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
-            <b> inconsistencies between images within the same set</b>.
-          </p>
+          <p>You will see <b>two sets of four images</b> per scene. Each set shows the same moment from different viewing angles.</p>
           <ul className="list-disc ml-5 space-y-1">
-            <li><b>Ignore preference and image quality.</b></li>
+            <li>Ignore preference and image quality.</li>
             <li>Focus only on <b>3D consistency</b>.</li>
             <li>Mark all inconsistencies you can find.</li>
           </ul>
@@ -630,6 +660,7 @@
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
+      // optional external config
       useEffect(() => {
         const url = getConfigParam();
         if (!url) return;
@@ -663,7 +694,10 @@
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
         if (saved) {
-          try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === "object") return parsed; } catch {}
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed && typeof parsed === "object") return parsed;
+          } catch {}
         }
         const blank = {};
         for (const sc of studyObj.scenes) {
