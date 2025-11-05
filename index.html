@@ -34,7 +34,7 @@
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
-    // ======= SAMPLE DATA =======
+    // ======= SAMPLE DATA (fallback only) =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
@@ -42,40 +42,22 @@
       scenes: [
         {
           sceneId: "scene_001",
-          title: "Mannequin Head",
+          title: "Sample Scene A",
           sets: [
-            { setId: "dge_s1", images: [
-              "https://picsum.photos/seed/scene1a/640/400",
-              "https://picsum.photos/seed/scene1b/640/400",
-              "https://picsum.photos/seed/scene1c/640/400",
-              "https://picsum.photos/seed/scene1d/640/400",
+            { setId: "a1", images: [
+              "https://picsum.photos/seed/a1/640/400",
+              "https://picsum.photos/seed/a2/640/400",
+              "https://picsum.photos/seed/a3/640/400",
+              "https://picsum.photos/seed/a4/640/400",
             ]},
-            { setId: "im2m_s1", images: [
-              "https://picsum.photos/seed/scene1e/640/400",
-              "https://picsum.photos/seed/scene1f/640/400",
-              "https://picsum.photos/seed/scene1g/640/400",
-              "https://picsum.photos/seed/scene1h/640/400",
+            { setId: "b1", images: [
+              "https://picsum.photos/seed/b1/640/400",
+              "https://picsum.photos/seed/b2/640/400",
+              "https://picsum.photos/seed/b3/640/400",
+              "https://picsum.photos/seed/b4/640/400",
             ]},
           ],
-        },
-        {
-          sceneId: "scene_002",
-          title: "Bust Sculpture",
-          sets: [
-            { setId: "dge_s2", images: [
-              "https://picsum.photos/seed/scene2a/640/400",
-              "https://picsum.photos/seed/scene2b/640/400",
-              "https://picsum.photos/seed/scene2c/640/400",
-              "https://picsum.photos/seed/scene2d/640/400",
-            ]},
-            { setId: "im2m_s2", images: [
-              "https://picsum.photos/seed/scene2e/640/400",
-              "https://picsum.photos/seed/scene2f/640/400",
-              "https://picsum.photos/seed/scene2g/640/400",
-              "https://picsum.photos/seed/scene2h/640/400",
-            ]},
-          ],
-        },
+        }
       ],
     };
 
@@ -125,15 +107,15 @@
       el.remove();
     }
 
-    // ======= ImageBox (dragRef + reuse-safe ensure) =======
-    function ImageBox({ src, imageIndex, pairs, activePairId, ensurePairForDraw, commitRect, updateRect, isPairFull }) {
+    // ======= ImageBox: draw only if there's an active, not-full pair =======
+    function ImageBox({ src, imageIndex, pairs, activePairId, verifyPairReady, commitRect, updateRect }) {
       const rootRef = useRef(null);
       const imgRef = useRef(null);
 
       const [ready, setReady] = useState(false);
       const [draft, setDraft] = useState(null); // {x,y,w,h,color}
 
-      const dragRef = useRef(null); // {startX,startY,curX,curY,pairId|null}
+      const dragRef = useRef(null); // {startX,startY,curX,curY, pairId}
       const DRAG_THRESH_PX = 4;
 
       const measureReady = useCallback(() => {
@@ -172,14 +154,17 @@
         if (!ready || e.button !== 0) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
+        // Only allow drawing if there's a valid active pair (exists and not full).
+        const pairOk = verifyPairReady(activePairId);
+        if (!pairOk) return; // Ignore drag start entirely
+
         const { left, top, w, h } = liveRect();
         if (e.clientX < left || e.clientX > left + w || e.clientY < top || e.clientY > top + h) return;
 
-        // if current active pair is full, we'll create a new one on mouseup
         dragRef.current = {
           startX: e.clientX, startY: e.clientY,
           curX: e.clientX, curY: e.clientY,
-          pairId: isPairFull(activePairId) ? null : (activePairId || null)
+          pairId: activePairId
         };
         setDraft(null);
 
@@ -196,19 +181,14 @@
 
         const w = Math.abs(d.curX - d.startX);
         const h = Math.abs(d.curY - d.startY);
-        if (Math.max(w, h) < DRAG_THRESH_PX) {
-          setDraft(null);
-          return;
-        }
+        if (Math.max(w, h) < DRAG_THRESH_PX) { setDraft(null); return; }
+
         const bounds = imgRef.current?.getBoundingClientRect();
         if (!bounds) return;
         const x = Math.min(d.startX, d.curX) - bounds.left;
         const y = Math.min(d.startY, d.curY) - bounds.top;
 
-        const activeColor =
-          (pairs.find(p => p.pairId === (d.pairId || activePairId)) || {}).color
-          || "#000";
-
+        const activeColor = (pairs.find(p => p.pairId === d.pairId) || {}).color || "#000";
         setDraft({
           x: clamp(x, 0, bounds.width),
           y: clamp(y, 0, bounds.height),
@@ -219,89 +199,65 @@
       };
 
       const onWindowMouseUp = () => {
-        const d = dragRef.current;
         window.removeEventListener('mousemove', onWindowMouseMove);
-
+        const d = dragRef.current;
         if (!d) return;
+
         const movedX = Math.abs(d.curX - d.startX);
         const movedY = Math.abs(d.curY - d.startY);
         const valid = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
 
         if (valid) {
-          const a = clientToFrac(Math.min(d.startX, d.curX), Math.min(d.startY, d.curY));
-          const b = clientToFrac(Math.max(d.startX, d.curX), Math.max(d.startY, d.curY));
-          const xf = clamp(a.fx, 0, 1 - 1e-6);
-          const yf = clamp(a.fy, 0, 1 - 1e-6);
-          const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
-          const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
-
-          // Ask parent to reuse current pair if available & not full, else create a new pair.
-          const ensuredPairId = ensurePairForDraw(d.pairId);
-          commitRect(ensuredPairId, { xf, yf, wf, hf, imageIndex });
+          // Re-verify pair (not full) at commit time; otherwise ignore.
+          if (verifyPairReady(d.pairId)) {
+            const a = clientToFrac(Math.min(d.startX, d.curX), Math.min(d.startY, d.curY));
+            const b = clientToFrac(Math.max(d.startX, d.curX), Math.max(d.startY, d.curY));
+            const xf = clamp(a.fx, 0, 1 - 1e-6);
+            const yf = clamp(a.fy, 0, 1 - 1e-6);
+            const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
+            const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+            commitRect(d.pairId, { xf, yf, wf, hf, imageIndex });
+          }
         }
-
         dragRef.current = null;
         setDraft(null);
       };
 
       // Move/resize existing rectangles (unchanged)
       const editRef = useRef(null);
-
       const startMoveRect = (e, pairId, rectIndex, rect) => {
         e.stopPropagation(); e.preventDefault();
         editRef.current = { pairId, rectIndex, mode: 'move', startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
         window.addEventListener('mousemove', onEditMove);
         window.addEventListener('mouseup', onEditEnd, { once: true });
       };
-
       const startResizeRect = (e, pairId, rectIndex, rect, handle) => {
         e.stopPropagation(); e.preventDefault();
         editRef.current = { pairId, rectIndex, mode: 'resize', handle, startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
         window.addEventListener('mousemove', onEditMove);
         window.addEventListener('mouseup', onEditEnd, { once: true });
       };
-
       const onEditMove = (e) => {
         const action = editRef.current; if (!action) return;
-
-        const { fx, fy } = clientToFrac(e.clientX, e.clientY);
         const r0 = action.startRect;
-
+        const { fx, fy } = clientToFrac(e.clientX, e.clientY);
         let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
         const minF = 8 / Math.max(liveRect().w, liveRect().h);
-
         if (action.mode === 'move') {
           const start = clientToFrac(action.startClientX, action.startClientY);
           xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
           yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
         } else {
-          const right = r0.xf + r0.wf;
-          const bottom = r0.yf + r0.hf;
-          if (action.handle === 'nw') {
-            xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF);
-            wf = right - xf; hf = bottom - yf;
-          } else if (action.handle === 'ne') {
-            xf = r0.xf;
-            const newRight = clamp(fx, r0.xf + minF, 1);
-            wf = newRight - r0.xf;
-            yf = clamp(fy, 0, bottom - minF); hf = bottom - yf;
-          } else if (action.handle === 'sw') {
-            yf = r0.yf;
-            const newBottom = clamp(fy, r0.yf + minF, 1);
-            hf = newBottom - r0.yf;
-            xf = clamp(fx, 0, right - minF); wf = right - xf;
-          } else if (action.handle === 'se') {
-            const newRight = clamp(fx, r0.xf + minF, 1);
-            const newBottom = clamp(fy, r0.yf + minF, 1);
-            wf = newRight - r0.xf; hf = newBottom - r0.yf;
-          }
+          const right = r0.xf + r0.wf, bottom = r0.yf + r0.hf;
+          if (action.handle === 'nw') { xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF); wf = right - xf; hf = bottom - yf; }
+          if (action.handle === 'ne') { xf = r0.xf; const newRight = clamp(fx, r0.xf + minF, 1); wf = newRight - r0.xf; yf = clamp(fy, 0, bottom - minF); hf = bottom - yf; }
+          if (action.handle === 'sw') { yf = r0.yf; const newBottom = clamp(fy, r0.yf + minF, 1); hf = newBottom - r0.yf; xf = clamp(fx, 0, right - minF); wf = right - xf; }
+          if (action.handle === 'se') { const newRight = clamp(fx, r0.xf + minF, 1); const newBottom = clamp(fy, r0.yf + minF, 1); wf = newRight - r0.xf; hf = newBottom - r0.yf; }
         }
-
         xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
         wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
         updateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
       };
-
       const onEditEnd = () => {
         window.removeEventListener('mousemove', onEditMove);
         editRef.current = null;
@@ -322,7 +278,7 @@
           ref={rootRef}
           onMouseDown={onMouseDownBackground}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
-          title={ready ? "Click-drag to draw a rectangle" : "Loading image…"}
+          title={ready ? "Click-drag to draw a rectangle (requires active pair)" : "Loading image…"}
         >
           <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
@@ -374,7 +330,7 @@
       );
     }
 
-    function SetViewer({ setDef, anno, activePairId, ensurePairForDraw, commitRect, updateRect, isPairFull }) {
+    function SetViewer({ setDef, anno, activePairId, verifyPairReady, commitRect, updateRect }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
@@ -384,10 +340,9 @@
                 imageIndex={idx}
                 pairs={(anno.pairs || []).filter((p) => p.visible)}
                 activePairId={activePairId}
-                ensurePairForDraw={ensurePairForDraw}
+                verifyPairReady={verifyPairReady}
                 commitRect={commitRect}
                 updateRect={updateRect}
-                isPairFull={isPairFull}
               />
             </div>
           ))}
@@ -400,7 +355,6 @@
       activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene
     }) {
       const pairs = setAnno.pairs || [];
-      const nextColor = useMemo(() => COLORS[pairs.length % COLORS.length], [pairs.length]);
 
       return (
         <div className="w-full lg:w-80 shrink-0 flex flex-col gap-3">
@@ -482,198 +436,6 @@
       );
     }
 
-    // Practice panel (kept for quick manual test)
-    function PracticePanel() {
-      const [pairs, setPairs] = useState([]);
-      const [activePairId, setActivePairId] = useState(null);
-
-      const pairsRef = useRef(pairs);
-      useEffect(() => { pairsRef.current = pairs; }, [pairs]);
-
-      const activePairIdRef = useRef(activePairId);
-      useEffect(() => { activePairIdRef.current = activePairId; }, [activePairId]);
-
-      const isPairFull = (pid) => {
-        if (!pid) return false;
-        const p = pairsRef.current.find(x => x.pairId === pid);
-        return !!p && (p.rects?.length || 0) >= 2;
-        };
-
-      const ensurePairForDraw = (maybeId) => {
-        // Prefer explicit id, otherwise the *latest* active id (via ref).
-        let useId = maybeId || activePairIdRef.current || null;
-        const exists = useId ? pairsRef.current.some(p => p.pairId === useId) : false;
-        const full = exists ? isPairFull(useId) : false;
-
-        if (exists && !full) {
-          setActivePairId(useId);
-          activePairIdRef.current = useId;
-          return useId;
-        }
-
-        // create a new pair
-        const id = uid();
-        const color = COLORS[pairsRef.current.length % COLORS.length];
-        setPairs(prev => [...prev, { pairId:id, color, label:"", visible:true, rects:[] }]);
-        setActivePairId(id);
-        activePairIdRef.current = id;
-        return id;
-      };
-
-      const commitRect = (pairId, rect) => {
-        setPairs(prev => prev.map(p => {
-          if (p.pairId !== pairId) return p;
-          const count = p.rects?.length || 0;
-          if (count >= 2) return p;                   // hard cap
-          const rects = [...p.rects, rect].slice(0,2);
-          return { ...p, rects };
-        }));
-      };
-
-      const updateRect = (pairId, rectIndex, newRect) => {
-        setPairs(prev => prev.map(p => {
-          if (p.pairId !== pairId) return p;
-          const rects = [...p.rects];
-          rects[rectIndex] = newRect;
-          return { ...p, rects };
-        }));
-      };
-
-      const reset = () => { setPairs([]); setActivePairId(null); };
-
-      const setDef = { images: [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
-      ]};
-
-      return (
-        <div className="border rounded-xl p-3 bg-white">
-          <div className="flex items-center justify-between mb-2">
-            <div className="font-semibold">Practice area (try it here)</div>
-            <div className="flex gap-2">
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={() => setActivePairId(ensurePairForDraw(null))}>New pair</button>
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
-            </div>
-          </div>
-          <SetViewer
-            setDef={setDef}
-            anno={{ pairs }}
-            activePairId={activePairId}
-            ensurePairForDraw={ensurePairForDraw}
-            commitRect={commitRect}
-            updateRect={updateRect}
-            isPairFull={isPairFull}
-          />
-          <div className="text-xs text-neutral-600 mt-2">
-            Tip: click-drag to draw; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
-          </div>
-        </div>
-      );
-    }
-
-    // Instructions
-    function InstructionsPanel() {
-      return (
-        <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
-          <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows the same moment from different viewing angles.
-            Focus on <b>3D consistency</b> only (shape, pose, identity, texture/material, lighting).
-          </p>
-          <ul className="list-disc ml-5 space-y-1">
-            <li>Ignore preference and image quality.</li>
-            <li>Mark all inconsistencies you can find.</li>
-          </ul>
-          {INTRO_VIDEO_URL && (
-            <div className="mt-2">
-              <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // Intro screen
-    function IntroScreen({ study, raterId, setRaterId, onStart, onClearAll }) {
-      return (
-        <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
-          <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
-          <InstructionsPanel />
-          <PracticePanel />
-
-          <div className="flex items-center gap-3 my-4">
-            <label className="text-sm w-24">Rater ID</label>
-            <input
-              className="flex-1 text-sm px-3 py-2 rounded-md border"
-              placeholder="e.g., r-8f4k-27"
-              value={raterId}
-              onChange={(e) => setRaterId(e.target.value)}
-            />
-            <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())}>
-              Randomize
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
-            <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
-                    disabled={!raterId} onClick={onStart}>
-              Start rating ▶
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // Thank-you screen
-    function ThankYouScreen({ onRestart, onClearAll }) {
-      return (
-        <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
-          <h1 className="text-2xl font-semibold mb-2">Thank you! 🎉</h1>
-          <p className="text-sm text-neutral-700 mb-6">Your ratings were submitted successfully.</p>
-          <div className="flex items-center justify-center gap-3">
-            <button className="px-3 py-2 rounded-lg border" onClick={onRestart}>Start over (keep data)</button>
-            <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={onClearAll} title="Clears rater id, annotations, and randomized set order for this study">
-              Clear all data & restart
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // Header
-    function HeaderBar({ phase, study, progressText, raterId, setRaterId, onSubmit, onClearAll, showInstr, setShowInstr, canSubmit }) {
-      return (
-        <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="text-lg font-semibold">3D Consistency Rater</div>
-              <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
-              <div className="text-xs text-neutral-500">{progressText}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              {phase === 'rate' && (
-                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => setShowInstr(!showInstr)}>
-                  {showInstr ? "Hide instructions" : "Show instructions"}
-                </button>
-              )}
-              <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID" value={raterId} onChange={(e) => setRaterId(e.target.value)} />
-              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
-              <button
-                className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
-                disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
-                onClick={onSubmit}
-                title={!canSubmit ? "Complete all scenes to enable Submit." : (ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet")}
-              >
-                Submit
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     // ======= Main App =======
     function App() {
       const [study, setStudy] = useState(SAMPLE_STUDY);
@@ -681,21 +443,51 @@
       const [setTab, setSetTab] = useState(0);
       const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
       const [activePairId, setActivePairId] = useState(null);
+
+      const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
+      const [raterId, setRaterId] = useState(() => localStorage.getItem('mv3d_rater_id')?.trim() || randomRaterId());
+      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
+
       const [loadingConfig, setLoadingConfig] = useState(false);
       const [configError, setConfigError] = useState(null);
       const [configSource, setConfigSource] = useState(null);
 
-      const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
-      const [showInstr, setShowInstr] = useState(false);
-      const [raterId, setRaterId] = useState(() => {
-        const saved = localStorage.getItem('mv3d_rater_id');
-        return saved && saved.trim() ? saved : randomRaterId();
-      });
-      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
-
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
+
+      // Load external study: ?config=<url> or fallback to ./study.json
+      useEffect(() => {
+        let cancelled = false;
+        const tryLoad = async () => {
+          const urlParam = getConfigParam();
+          const candidates = urlParam ? [urlParam] : ['study.json'];
+          for (const url of candidates) {
+            try {
+              setLoadingConfig(true); setConfigError(null);
+              const res = await fetch(url, { cache: 'no-store' });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              const json = await res.json();
+              if (cancelled) return;
+              if (json && json.scenes && json.setNames) {
+                setStudy(json);
+                setAnnos(loadInitialAnnos(json));
+                setSceneIdx(0); setSetTab(0); setActivePairId(null);
+                setUiOrder(buildOrLoadUiOrder(json));
+                setConfigSource(url);
+                break;
+              }
+            } catch (e) {
+              if (!urlParam) { /* ignore error, will keep SAMPLE_STUDY */ }
+              else setConfigError(String(e));
+            } finally {
+              setLoadingConfig(false);
+            }
+          }
+        };
+        tryLoad();
+        return () => { cancelled = true; };
+      }, []);
 
       // derive current
       const currentScene = study.scenes[sceneIdx];
@@ -704,12 +496,8 @@
       const sceneAnno = (annos[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} });
       const setAnno = (sceneAnno.sets[setDef.setId] || { setId: setDef.setId, noInconsistencies: false, pairs: [] });
 
-      // refs to avoid races
       const setAnnoRef = useRef(setAnno);
       useEffect(() => { setAnnoRef.current = setAnno; }, [setAnno]);
-
-      const activePairIdRef = useRef(activePairId);
-      useEffect(() => { activePairIdRef.current = activePairId; }, [activePairId]);
 
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
@@ -742,32 +530,26 @@
       }
 
       const isPairFull = (pid) => {
-        if (!pid) return false;
+        if (!pid) return true;
         const p = (setAnnoRef.current.pairs || []).find(x => x.pairId === pid);
-        return !!p && (p.rects?.length || 0) >= 2;
+        return !p || (p.rects?.length || 0) >= 2;
       };
 
-      // Ensure a pair exists; reuse active if exists & not full; otherwise create new
-      const ensurePairForDraw = (maybeId) => {
-        let useId = maybeId || activePairIdRef.current || null;
-        const exists = useId ? (setAnnoRef.current.pairs || []).some(p => p.pairId === useId) : false;
-        const full = exists ? isPairFull(useId) : false;
+      // Verify only (no auto-create). Returns true if pair exists & not full.
+      const verifyPairReady = (pid) => {
+        if (!pid) return false;
+        const p = (setAnnoRef.current.pairs || []).find(x => x.pairId === pid);
+        return !!p && (p.rects?.length || 0) < 2;
+      };
 
-        if (exists && !full) {
-          setActivePairId(useId);
-          activePairIdRef.current = useId;
-          return useId;
-        }
-
-        // Create a new pair
+      // Explicit creation via button
+      const createNewPair = () => {
         const id = uid();
         mutateCurrentSet(set => {
           const color = COLORS[set.pairs.length % COLORS.length];
           return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
         });
         setActivePairId(id);
-        activePairIdRef.current = id;
-        return id;
       };
 
       const commitRect = (pairId, rect) => {
@@ -781,6 +563,7 @@
           pairs[idx] = { ...p, rects: [...p.rects, rect].slice(0,2) };
           return { ...set, pairs, noInconsistencies: false };
         });
+        // Do NOT clear activePairId; user can still move/resize, but drawing a 3rd will be blocked.
       };
 
       const updateRect = (pairId, rectIndex, newRect) => {
@@ -808,30 +591,6 @@
         mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,label}:p) }));
       }
 
-      function onImport(json) {
-        if (json && json.scenes && json.setNames) {
-          setStudy(json);
-          setAnnos(loadInitialAnnos(json));
-          setSceneIdx(0);
-          setSetTab(0);
-          setActivePairId(null);
-          setUiOrder(buildOrLoadUiOrder(json));
-        } else if (json && json.studyId && typeof json === "object") {
-          if (json.annos) setAnnos(json.annos);
-          if (json.study) {
-            setStudy(json.study);
-            setUiOrder(buildOrLoadUiOrder(json.study));
-          }
-        } else {
-          alert("Unrecognized JSON format.");
-        }
-      }
-
-      function onExport() {
-        const payload = { study, annos, exportedAt: new Date().toISOString(), uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS };
-        download(`${study.studyId}__results.json`, pretty(payload));
-      }
-
       function canProceedScene(sceneIndex = sceneIdx) {
         const sc = study.scenes[sceneIndex];
         const savedScene = annos[sc.sceneId];
@@ -843,12 +602,10 @@
         const ok = (a) => !!a && (a.noInconsistencies === true || (Array.isArray(a.pairs) && a.pairs.some((p) => Array.isArray(p.rects) && p.rects.length === 2)));
         return ok(a0) && ok(a1);
       }
-
       function allScenesComplete() {
         if (!study || !Array.isArray(study.scenes)) return false;
         return study.scenes.every((_, i) => canProceedScene(i));
       }
-
       function gotoNextScene() {
         if (sceneIdx < study.scenes.length - 1) {
           setSceneIdx(sceneIdx + 1);
@@ -877,11 +634,8 @@
           fd.append('raterId', raterId);
           fd.append('studyId', study.studyId);
           fd.append('payload', JSON.stringify({
-            study,
-            annos,
-            exportedAt: new Date().toISOString(),
-            uiOrderByScene: uiOrder,
-            hiddenSetLabels: HIDDEN_SET_LABELS
+            study, annos, exportedAt: new Date().toISOString(),
+            uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
           setPhase('thanks');
@@ -906,7 +660,6 @@
         setActivePairId(null);
         setPhase('intro');
         setUiOrder(buildOrLoadUiOrder(study));
-        setShowInstr(false);
         alert('Cleared. You can start fresh.');
       }
 
@@ -918,33 +671,41 @@
 
       return (
         <div className="min-h-screen bg-neutral-50 text-neutral-900">
-          <HeaderBar
-            phase={phase}
-            study={study}
-            progressText={progressText}
-            raterId={raterId}
-            setRaterId={setRaterId}
-            onSubmit={submitToServer}
-            onClearAll={clearAllData}
-            showInstr={showInstr}
-            setShowInstr={setShowInstr}
-            canSubmit={canSubmit}
-          />
+          <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
+            <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="text-lg font-semibold">3D Consistency Rater</div>
+                <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
+                <div className="text-xs text-neutral-500">{progressText}</div>
+                {configSource && <div className="text-xs text-emerald-700">Loaded: <code>{configSource}</code></div>}
+                {configError && <div className="text-xs text-red-600">Config error: {String(configError)}</div>}
+              </div>
+              <div className="flex items-center gap-2">
+                <input className="text-sm px-2 py-1.5 rounded-md border w-36" placeholder="Rater ID" value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={clearAllData}>Clear all data</button>
+                <button
+                  className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
+                  disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
+                  onClick={submitToServer}
+                >
+                  Submit
+                </button>
+              </div>
+            </div>
+          </div>
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
-            {phase === 'intro' ? (
-              <IntroScreen
-                study={study}
-                raterId={raterId}
-                setRaterId={setRaterId}
-                onStart={() => setPhase('rate')}
-                onClearAll={clearAllData}
-              />
-            ) : phase === 'thanks' ? (
-              <ThankYouScreen
-                onRestart={() => { setPhase('intro'); setShowInstr(false); }}
-                onClearAll={clearAllData}
-              />
+            {phase === 'thanks' ? (
+              <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
+                <h1 className="text-2xl font-semibold mb-2">Thank you! 🎉</h1>
+                <p className="text-sm text-neutral-700 mb-6">Your ratings were submitted successfully.</p>
+                <div className="flex items-center justify-center gap-3">
+                  <button className="px-3 py-2 rounded-lg border" onClick={() => setPhase('intro')}>Start over (keep data)</button>
+                  <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={clearAllData}>
+                    Clear all data & restart
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -965,27 +726,32 @@
                 <div className="flex flex-col lg:flex-row gap-4 items-start">
                   <div className="flex-1 w-full">
                     <SetViewer
-                      setDef={setDef}
+                      setDef={currentScene.sets[order[setTab]]}
                       anno={setAnno}
                       activePairId={activePairId}
-                      ensurePairForDraw={ensurePairForDraw}
+                      verifyPairReady={verifyPairReady}
                       commitRect={commitRect}
                       updateRect={updateRect}
-                      isPairFull={isPairFull}
                     />
                   </div>
                   <Sidebar
                     setAnno={setAnno}
                     onChange={(upd) => mutateCurrentSet(() => upd)}
-                    onNewPair={() => setActivePairId(ensurePairForDraw(null))}
+                    onNewPair={createNewPair}
                     onDeletePair={deletePair}
                     onTogglePair={togglePair}
                     onLabelPair={labelPair}
                     activePairId={activePairId}
                     setActivePairId={setActivePairId}
-                    canFinishScene={canProceedScene()}
-                    onNextScene={gotoNextScene}
-                    onPrevScene={gotoPrevScene}
+                    canFinishScene={(() => {
+                      const sc = study.scenes[sceneIdx];
+                      const saved = annos[sc.sceneId]; if (!saved) return false;
+                      const a = saved.sets[sc.sets[0].setId], b = saved.sets[sc.sets[1].setId];
+                      const ok = (x) => x && (x.noInconsistencies || (x.pairs||[]).some(p => (p.rects||[]).length === 2));
+                      return ok(a) && ok(b);
+                    })()}
+                    onNextScene={() => gotoNextScene()}
+                    onPrevScene={() => gotoPrevScene()}
                   />
                 </div>
 
