@@ -171,6 +171,7 @@
 
       const onBackgroundMouseDown = (e) => {
         if (!ready) return;
+        if (e.button !== 0) return; // left click only
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
         // Get pair synchronously
@@ -616,7 +617,7 @@
                 className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
                 disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
                 onClick={onSubmit}
-                title={!canSubmit ? "Complete all scenes to enable Submit." : (ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet")}
+                title={!canSubmit ? "Complete all scenes to enable Submit." : (ENDPOINT includes "PASTE_" ? "Set ENDPOINT in code first" : "Submit to Google Sheet")}
               >
                 Submit
               </button>
@@ -741,7 +742,7 @@
         let newLen = 0;
         mutateCurrentSet(set => {
           const idx = set.pairs.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return set; // pair missing (shouldn't happen now)
+          if (idx < 0) return set; // pair missing
           const p = set.pairs[idx];
           if ((p.rects || []).length >= 2) return set;
           const updated = { ...p, rects: [...(p.rects || []), rect] };
@@ -950,7 +951,7 @@
                   </div>
                   <Sidebar
                     setAnno={setAnno}
-                    onChange={(upd) => mutateCurrentSet(() => upd)} {/* keep UI wiring */}
+                    onChange={(upd) => mutateCurrentSet(() => upd)}
                     onNewPair={(color) => newPair(color)}
                     onDeletePair={deletePair}
                     onTogglePair={togglePair}
