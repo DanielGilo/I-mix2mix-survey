@@ -33,9 +33,11 @@
     // ======= CONFIG =======
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
-    const PROLIFIC_COMPLETION_URL = "https://app.prolific.com/submissions/complete?cc=CF8X52JX";
 
-    // ======= SAMPLE DATA (fallback only) =======
+    // Minimal view time per set (in seconds)
+    const MIN_VIEW_SECS = 30;
+
+    // ======= SAMPLE DATA (keep your study.json integration if you load externally) =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
@@ -43,22 +45,40 @@
       scenes: [
         {
           sceneId: "scene_001",
-          title: "Sample Scene",
+          title: "Mannequin Head",
           sets: [
-            { setId: "a1", images: [
-              "https://picsum.photos/seed/a1/640/400",
-              "https://picsum.photos/seed/a2/640/400",
-              "https://picsum.photos/seed/a3/640/400",
-              "https://picsum.photos/seed/a4/640/400",
+            { setId: "dge_s1", images: [
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
             ]},
-            { setId: "b1", images: [
-              "https://picsum.photos/seed/b1/640/400",
-              "https://picsum.photos/seed/b2/640/400",
-              "https://picsum.photos/seed/b3/640/400",
-              "https://picsum.photos/seed/b4/640/400",
+            { setId: "im2m_s1", images: [
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
             ]},
           ],
-        }
+        },
+        {
+          sceneId: "scene_002",
+          title: "Bust Sculpture",
+          sets: [
+            { setId: "dge_s2", images: [
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
+            ]},
+            { setId: "im2m_s2", images: [
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_0.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_1.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_2.png",
+              "https://danielgilo.github.io/I-mix2mix-survey/study/example/edit_3.png",
+            ]},
+          ],
+        },
       ],
     };
 
@@ -69,6 +89,7 @@
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
     const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
+    const VIEWED_KEY = (studyId) => `mv3d_firstseen__${studyId}`;  // NEW: first-seen timestamps per set
     const HIDDEN_SET_LABELS = ["Set A", "Set B"];
 
     function buildOrLoadUiOrder(study) {
@@ -84,22 +105,23 @@
       return map;
     }
 
-    // Read Prolific params
-    function getProlificParam(name) {
-      try {
-        const sp = new URLSearchParams(window.location.search);
-        return sp.get(name) || sp.get(name.toLowerCase()) || null;
-      } catch { return null; }
-    }
-    function getProlificIdFromQuery() {
-      // Prolific sends PROLIFIC_PID (and STUDY_ID, SESSION_ID)
-      return getProlificParam("PROLIFIC_PID");
-    }
+    const randomRaterId = () => {
+      const a = Math.random().toString(36).slice(2, 6);
+      const b = String(Math.floor(Math.random() * 100)).padStart(2, "0");
+      return `r-${a}-${b}`;
+    };
 
     function getConfigParam() {
       try {
         const sp = new URLSearchParams(window.location.search);
         const u = sp.get('config');
+        return u && u.trim() ? u.trim() : null;
+      } catch { return null; }
+    }
+    function getProlificPID() {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const u = sp.get('PROLIFIC_PID');
         return u && u.trim() ? u.trim() : null;
       } catch { return null; }
     }
@@ -114,16 +136,16 @@
       el.remove();
     }
 
-    // ======= ImageBox: draw only if there's an active, not-full pair =======
-    function ImageBox({ src, imageIndex, pairs, activePairId, verifyPairReady, commitRect, updateRect }) {
-      const rootRef = useRef(null);
+    // ======= ImageBox (drawing/resize/move) =======
+    function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onUpdateRect }) {
+      const ref = useRef(null);
       const imgRef = useRef(null);
 
+      const [drag, setDrag] = useState(null);
       const [ready, setReady] = useState(false);
-      const [draft, setDraft] = useState(null); // {x,y,w,h,color}
+      const editRef = useRef(null);
 
-      const dragRef = useRef(null); // {startX,startY,curX,curY, pairId}
-      const DRAG_THRESH_PX = 4;
+      const DRAG_THRESH_PX = 6;
 
       const measureReady = useCallback(() => {
         const img = imgRef.current;
@@ -133,13 +155,13 @@
       useEffect(() => {
         measureReady();
         const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureReady) : null;
-        if (ro && rootRef.current) ro.observe(rootRef.current);
+        if (ro && ref.current) ro.observe(ref.current);
         window.addEventListener("resize", measureReady);
         const img = imgRef.current;
         const onLoad = () => measureReady();
         if (img) img.addEventListener("load", onLoad);
         return () => {
-          if (ro && rootRef.current) ro.disconnect();
+          if (ro && ref.current) ro.disconnect();
           window.removeEventListener("resize", measureReady);
           if (img) img.removeEventListener("load", onLoad);
         };
@@ -154,115 +176,92 @@
         const { left, top, w, h } = liveRect();
         const x = clamp(clientX - left, 0, w);
         const y = clamp(clientY - top, 0, h);
-        return { fx: x / w, fy: y / h, x, y, w, h, left, top };
+        return { fx: x / w, fy: y / h, x, y, left, top, w, h };
       };
 
-      const onMouseDownBackground = (e) => {
-        if (!ready || e.button !== 0) return;
+      // Background click-drag → creates rectangle only if an active pair exists and has <2 rects
+      const onBackgroundMouseDown = (e) => {
+        if (!ready) return;
+        if (e.button !== 0) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
-        const pairOk = verifyPairReady(activePairId);
-        if (!pairOk) return;
+        // Ensure current active pair can accept a rect
+        const pair = pairs.find(p => p.pairId === activePairId);
+        if (!pair || (pair.rects?.length ?? 0) >= 2) return; // must explicitly click "New pair" to continue
 
         const { left, top, w, h } = liveRect();
-        if (e.clientX < left || e.clientX > left + w || e.clientY < top || e.clientY > top + h) return;
+        const inside = e.clientX >= left && e.clientX <= left + w && e.clientY >= top && e.clientY <= top + h;
+        if (!inside) return;
 
-        dragRef.current = {
-          startX: e.clientX, startY: e.clientY,
-          curX: e.clientX, curY: e.clientY,
-          pairId: activePairId
-        };
-        setDraft(null);
-
-        window.addEventListener('mousemove', onWindowMouseMove);
-        window.addEventListener('mouseup', onWindowMouseUp, { once: true });
+        setDrag({ startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId: activePairId });
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
         e.preventDefault();
       };
 
       const onWindowMouseMove = (e) => {
-        const d = dragRef.current;
-        if (!d) return;
-        d.curX = e.clientX;
-        d.curY = e.clientY;
+        if (drag) setDrag((d) => ({ ...d, curX: e.clientX, curY: e.clientY }));
 
-        const w = Math.abs(d.curX - d.startX);
-        const h = Math.abs(d.curY - d.startY);
-        if (Math.max(w, h) < DRAG_THRESH_PX) { setDraft(null); return; }
+        if (editRef.current) {
+          const { fx, fy } = clientToFrac(e.clientX, e.clientY);
+          const action = editRef.current;
+          const r0 = action.startRect;
 
-        const bounds = imgRef.current?.getBoundingClientRect();
-        if (!bounds) return;
-        const x = Math.min(d.startX, d.curX) - bounds.left;
-        const y = Math.min(d.startY, d.curY) - bounds.top;
-        const activeColor = (pairs.find(p => p.pairId === d.pairId) || {}).color || "#000";
-        setDraft({
-          x: clamp(x, 0, bounds.width),
-          y: clamp(y, 0, bounds.height),
-          w: clamp(w, 0, bounds.width),
-          h: clamp(h, 0, bounds.height),
-          color: activeColor,
-        });
+          let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
+          const minF = 8 / Math.max(liveRect().w, liveRect().h);
+          if (action.mode === 'move') {
+            const start = clientToFrac(action.startClientX, action.startClientY);
+            xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
+            yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
+          } else {
+            const right = r0.xf + r0.wf;
+            const bottom = r0.yf + r0.hf;
+            if (action.handle === 'nw') {
+              xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF);
+              wf = right - xf; hf = bottom - yf;
+            } else if (action.handle === 'ne') {
+              xf = r0.xf;
+              const newRight = clamp(fx, r0.xf + minF, 1);
+              wf = newRight - r0.xf;
+              yf = clamp(fy, 0, bottom - minF); hf = bottom - yf;
+            } else if (action.handle === 'sw') {
+              yf = r0.yf;
+              const newBottom = clamp(fy, r0.yf + minF, 1);
+              hf = newBottom - r0.yf;
+              xf = clamp(fx, 0, right - minF); wf = right - xf;
+            } else if (action.handle === 'se') {
+              xf = r0.xf; yf = r0.yf;
+              const newRight = clamp(fx, r0.xf + minF, 1);
+              const newBottom = clamp(fy, r0.yf + minF, 1);
+              wf = newRight - r0.xf; hf = newBottom - r0.yf;
+            }
+          }
+          xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
+          wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
+          onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
+        }
       };
 
       const onWindowMouseUp = () => {
-        window.removeEventListener('mousemove', onWindowMouseMove);
-        const d = dragRef.current;
-        if (!d) return;
+        if (drag) {
+          const { startX, startY, curX, curY, pairId } = drag;
+          const movedX = Math.abs(curX - startX);
+          const movedY = Math.abs(curY - startY);
+          const movedEnough = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
 
-        const movedX = Math.abs(d.curX - d.startX);
-        const movedY = Math.abs(d.curY - d.startY);
-        const valid = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
-
-        if (valid && verifyPairReady(d.pairId)) {
-          const a = clientToFrac(Math.min(d.startX, d.curX), Math.min(d.startY, d.curY));
-          const b = clientToFrac(Math.max(d.startX, d.curX), Math.max(d.startY, d.curY));
-          const xf = clamp(a.fx, 0, 1 - 1e-6);
-          const yf = clamp(a.fy, 0, 1 - 1e-6);
-          const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
-          const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
-          commitRect(d.pairId, { xf, yf, wf, hf, imageIndex });
+          if (movedEnough) {
+            const a = clientToFrac(Math.min(startX, curX), Math.min(startY, curY));
+            const b = clientToFrac(Math.max(startX, curX), Math.max(startY, curY));
+            const xf = clamp(a.fx, 0, 1 - 1e-6);
+            const yf = clamp(a.fy, 0, 1 - 1e-6);
+            const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
+            const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+            onFinishRect && onFinishRect(pairId, { xf, yf, wf, hf, imageIndex });
+          }
+          setDrag(null);
         }
-        dragRef.current = null;
-        setDraft(null);
-      };
-
-      // Move/resize existing rectangles
-      const editRef = useRef(null);
-      const startMoveRect = (e, pairId, rectIndex, rect) => {
-        e.stopPropagation(); e.preventDefault();
-        editRef.current = { pairId, rectIndex, mode: 'move', startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
-        window.addEventListener('mousemove', onEditMove);
-        window.addEventListener('mouseup', onEditEnd, { once: true });
-      };
-      const startResizeRect = (e, pairId, rectIndex, rect, handle) => {
-        e.stopPropagation(); e.preventDefault();
-        editRef.current = { pairId, rectIndex, mode: 'resize', handle, startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
-        window.addEventListener('mousemove', onEditMove);
-        window.addEventListener('mouseup', onEditEnd, { once: true });
-      };
-      const onEditMove = (e) => {
-        const action = editRef.current; if (!action) return;
-        const r0 = action.startRect;
-        const { fx, fy } = clientToFrac(e.clientX, e.clientY);
-        let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
-        const minF = 8 / Math.max(liveRect().w, liveRect().h);
-        if (action.mode === 'move') {
-          const start = clientToFrac(action.startClientX, action.startClientY);
-          xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
-          yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
-        } else {
-          const right = r0.xf + r0.wf, bottom = r0.yf + r0.hf;
-          if (action.handle === 'nw') { xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF); wf = right - xf; hf = bottom - yf; }
-          if (action.handle === 'ne') { xf = r0.xf; const newRight = clamp(fx, r0.xf + minF, 1); wf = newRight - r0.xf; yf = clamp(fy, 0, bottom - minF); hf = bottom - yf; }
-          if (action.handle === 'sw') { yf = r0.yf; const newBottom = clamp(fy, r0.yf + minF, 1); hf = newBottom - r0.yf; xf = clamp(fx, 0, right - minF); wf = right - xf; }
-          if (action.handle === 'se') { const newRight = clamp(fx, r0.xf + minF, 1); const newBottom = clamp(fy, r0.yf + minF, 1); wf = newRight - r0.xf; hf = newBottom - r0.yf; }
-        }
-        xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
-        wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
-        updateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
-      };
-      const onEditEnd = () => {
-        window.removeEventListener('mousemove', onEditMove);
         editRef.current = null;
+        window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
       const toClientStyle = (r) => ({
@@ -272,15 +271,48 @@
         height: `${r.hf * 100}%`,
       });
 
+      const onRectMouseDown = (e, pairId, absIndex, rect) => {
+        e.stopPropagation();
+        e.preventDefault();
+        editRef.current = {
+          pairId, rectIndex: absIndex, mode: 'move',
+          startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY
+        };
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
+      };
+
+      const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
+        e.stopPropagation();
+        e.preventDefault();
+        editRef.current = {
+          pairId, rectIndex: absIndex, mode: 'resize', handle,
+          startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY
+        };
+        window.addEventListener("mousemove", onWindowMouseMove);
+        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
+      };
+
       const rectsForThisImage = (p) =>
         (p.rects || []).map((r, absIndex) => ({ r, absIndex })).filter(({ r }) => r.imageIndex === imageIndex);
 
+      // Draft box while dragging
+      const draftBox = drag ? (() => {
+        const r = imgRef.current?.getBoundingClientRect(); if (!r) return null;
+        const w = Math.abs(drag.curX - drag.startX);
+        const h = Math.abs(drag.curY - drag.startY);
+        if (Math.max(w, h) < DRAG_THRESH_PX) return null;
+        const x = Math.min(drag.startX, drag.curX) - r.left;
+        const y = Math.min(drag.startY, drag.curY) - r.top;
+        return { x: Math.max(0, x), y: Math.max(0, y), w, h };
+      })() : null;
+
       return (
         <div
-          ref={rootRef}
-          onMouseDown={onMouseDownBackground}
+          ref={ref}
+          onMouseDown={onBackgroundMouseDown}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
-          title={ready ? "Click-drag to draw a rectangle (requires active pair)" : "Loading image…"}
+          title={ready ? "Click-drag to draw a rectangle" : "Loading image…"}
         >
           <img ref={imgRef} src={src} alt="view" className="w-full h-auto object-contain block" draggable={false} />
 
@@ -298,33 +330,33 @@
                     color,
                     background: p.pairId === activePairId ? `${color}22` : "transparent",
                   }}
-                  onMouseDown={(e) => startMoveRect(e, p.pairId, absIndex, r)}
+                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
                 >
                   <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: color }}>
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
                   <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'nw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
                   <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'ne')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
                   <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'sw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
                   <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'se')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
                 </div>
               );
             })
           )}
 
-          {draft && (
+          {draftBox && (
             <div
               className="absolute border-2 border-dashed pointer-events-none"
               style={{
-                left: draft.x,
-                top: draft.y,
-                width: draft.w,
-                height: draft.h,
-                borderColor: draft.color,
+                left: draftBox.x,
+                top: draftBox.y,
+                width: draftBox.w,
+                height: draftBox.h,
+                borderColor: ((pairs.find((p) => p.pairId === (drag?.pairId || activePairId)) || {}).color) || "#000",
               }}
             />
           )}
@@ -332,7 +364,7 @@
       );
     }
 
-    function SetViewer({ setDef, anno, activePairId, verifyPairReady, commitRect, updateRect }) {
+    function SetViewer({ setDef, anno, onFinishRect, activePairId, onUpdateRect }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
@@ -342,9 +374,8 @@
                 imageIndex={idx}
                 pairs={(anno.pairs || []).filter((p) => p.visible)}
                 activePairId={activePairId}
-                verifyPairReady={verifyPairReady}
-                commitRect={commitRect}
-                updateRect={updateRect}
+                onFinishRect={onFinishRect}
+                onUpdateRect={onUpdateRect}
               />
             </div>
           ))}
@@ -354,9 +385,11 @@
 
     function Sidebar({
       setAnno, onChange, onNewPair, onDeletePair, onTogglePair, onLabelPair,
-      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene
+      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene,
+      timeGate // { perSetStatus: [{label, done, remain}], allDone }
     }) {
       const pairs = setAnno.pairs || [];
+      const nextColor = useMemo(() => COLORS[pairs.length % COLORS.length], [pairs.length]);
 
       return (
         <div className="w-full lg:w-80 shrink-0 flex flex-col gap-3">
@@ -376,11 +409,12 @@
           <div className="p-3 rounded-xl border bg-white shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Pairs</div>
-              <button className="text-xs px-3 py-1 rounded-md border" title="N" onClick={onNewPair}>
-                New pair (N)
+              <button className="text-xs px-3 py-1 rounded-md border" title="New pair"
+                      onClick={onNewPair}>
+                New pair
               </button>
             </div>
-            <div className="text-xs text-neutral-500 mt-1">Start a pair, then draw rectangles on two views.</div>
+            <div className="text-xs text-neutral-500 mt-1">Add a pair, then draw rectangles on two views.</div>
 
             <div className="mt-3 flex flex-col gap-2 max-h-64 overflow-auto pr-1">
               {pairs.length === 0 && <div className="text-sm text-neutral-400">No pairs yet.</div>}
@@ -413,7 +447,25 @@
                     value={p.label}
                     onChange={(e) => onLabelPair(p.pairId, e.target.value)}
                   />
-                  <div className="text-[11px] text-neutral-500 mt-1">Rectangles: {p.rects.length} / 2</div>
+                  <div className="text-[11px] text-neutral-500 mt-1">Rectangles: {Math.min(p.rects.length, 2)} / 2</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <!-- Time requirement block -->
+          <div className="p-3 rounded-xl border bg-white shadow-sm">
+            <div className="font-semibold mb-2">Viewing requirement</div>
+            <div className="text-xs text-neutral-600 mb-2">
+              View each set for at least <b>{MIN_VIEW_SECS}s</b>. Countdown updates live.
+            </div>
+            <div className="flex flex-col gap-1">
+              {timeGate.perSetStatus.map((s, i) => (
+                <div key={i} className="text-sm flex items-center justify-between">
+                  <div>{s.label}</div>
+                  <div className={`px-2 py-0.5 rounded ${s.done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                    {s.done ? "Done" : `${s.remain}s left`}
+                  </div>
                 </div>
               ))}
             </div>
@@ -426,9 +478,10 @@
             <div className="flex gap-2">
               <button className="px-3 py-2 rounded-lg border" onClick={onPrevScene}>◀ Prev scene</button>
               <button
-                className={`px-3 py-2 rounded-lg border ${canFinishScene ? "bg-black text-white" : "opacity-50"}`}
-                disabled={!canFinishScene}
+                className={`px-3 py-2 rounded-lg border ${(canFinishScene && timeGate.allDone) ? "bg-black text-white" : "opacity-50"}`}
+                disabled={!(canFinishScene && timeGate.allDone)}
                 onClick={() => onNextScene()}
+                title={timeGate.allDone ? (canFinishScene ? "Go to next scene" : "Complete annotations to continue") : "Keep viewing until timers finish"}
               >
                 Next scene ▶
               </button>
@@ -438,68 +491,37 @@
       );
     }
 
-    // ---------- Instructions + Practice ----------
-    function InstructionsPanel() {
-      return (
-        <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
-          <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows the same moment
-            from different viewing angles. Focus on <b>3D consistency</b> only (shape, pose, identity,
-            texture/material, lighting). Mark all inconsistencies you can find.
-          </p>
-          {INTRO_VIDEO_URL && (
-            <div className="mt-2">
-              <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // Practice panel uses its own local state, same rules (no auto-pair; cap at 2)
+    // Practice panel (unchanged logic)
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
 
-      const verifyPairReady = (pid) => {
-        if (!pid) return false;
-        const p = pairs.find(x => x.pairId === pid);
-        return !!p && (p.rects?.length || 0) < 2;
-      };
-
-      const createNewPair = () => {
+      const onNewPair = () => {
         const id = uid();
-        setPairs(prev => {
-          const color = COLORS[prev.length % COLORS.length];
-          return [...prev, { pairId:id, color, label:"", visible:true, rects:[] }];
-        });
+        const color = COLORS[(pairs.length) % COLORS.length];
+        setPairs(prev => [...prev, { pairId:id, color, label:"", visible:true, rects:[] }]);
         setActivePairId(id);
       };
 
-      const commitRect = (pairId, rect) => {
-        setPairs(prev => {
-          const arr = [...prev];
-          const idx = arr.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return prev;
-          const p = arr[idx];
-          const count = p.rects?.length || 0;
-          if (count >= 2) return prev;
-          arr[idx] = { ...p, rects: [...p.rects, rect].slice(0,2) };
-          return arr;
-        });
+      const onFinishRect = (pairId, rect) => {
+        setPairs(prev => prev.map(p => {
+          if (p.pairId !== pairId) return p;
+          if ((p.rects?.length ?? 0) >= 2) return p;
+          const rects = [...p.rects, rect];
+          return { ...p, rects };
+        }));
+        const pair = pairs.find(p => p.pairId === pairId);
+        const newLen = pair ? Math.min((pair.rects?.length ?? 0) + 1, 2) : 1;
+        if (newLen >= 2) setActivePairId(null);
       };
 
-      const updateRect = (pairId, rectIndex, newRect) => {
-        setPairs(prev => {
-          const arr = [...prev];
-          const idx = arr.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return prev;
-          const p = arr[idx];
+      const onUpdateRect = (pairId, rectIndex, newRect) => {
+        setPairs(prev => prev.map(p => {
+          if (p.pairId !== pairId) return p;
           const rects = [...p.rects];
           rects[rectIndex] = newRect;
-          arr[idx] = { ...p, rects };
-          return arr;
-        });
+          return { ...p, rects };
+        }));
       };
 
       const reset = () => { setPairs([]); setActivePairId(null); };
@@ -516,7 +538,7 @@
           <div className="flex items-center justify-between mb-2">
             <div className="font-semibold">Practice area (try it here)</div>
             <div className="flex gap-2">
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={createNewPair}>New pair</button>
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={onNewPair}>New pair</button>
               <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
             </div>
           </div>
@@ -524,40 +546,121 @@
             setDef={setDef}
             anno={{ pairs }}
             activePairId={activePairId}
-            verifyPairReady={verifyPairReady}
-            commitRect={commitRect}
-            updateRect={updateRect}
+            onFinishRect={onFinishRect}
+            onUpdateRect={onUpdateRect}
           />
           <div className="text-xs text-neutral-600 mt-2">
-            Tip: select a pair, then <b>click-drag</b> to draw rectangles (max two per pair). Click inside to move; use corners to resize.
+            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
           </div>
         </div>
       );
     }
 
-    function IntroScreen({ study, prolificId, setProlificId, onStart, onClearAll, locked }) {
+    // Instructions
+    function InstructionsPanel() {
+      return (
+        <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
+          <p>
+            You will see <b>two sets of four images</b> per scene. Each set shows the same moment from different viewing angles.
+            Focus on <b>3D consistency</b> only (shape, pose, identity, texture/material, lighting).
+          </p>
+          <ul className="list-disc ml-5 space-y-1">
+            <li>Ignore preference and image quality.</li>
+            <li>Mark all inconsistencies you can find.</li>
+          </ul>
+          {INTRO_VIDEO_URL && (
+            <div className="mt-2">
+              <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Intro screen (Prolific ready)
+    function IntroScreen({ study, raterId, setRaterId, raterLocked, onStart, onClearAll }) {
       return (
         <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
           <InstructionsPanel />
           <PracticePanel />
+
           <div className="flex items-center gap-3 my-4">
-            <label className="text-sm w-28">Prolific ID</label>
+            <label className="text-sm w-32">Prolific ID</label>
             <input
-              className={`flex-1 text-sm px-3 py-2 rounded-md border ${locked ? "bg-neutral-100" : ""}`}
-              placeholder="Your Prolific ID (PROLIFIC_PID)"
-              value={prolificId}
-              onChange={(e) => !locked && setProlificId(e.target.value)}
-              readOnly={locked}
+              className="flex-1 text-sm px-3 py-2 rounded-md border"
+              placeholder="Enter your Prolific ID"
+              value={raterId}
+              onChange={(e) => !raterLocked && setRaterId(e.target.value)}
+              readOnly={raterLocked}
             />
-            {locked && <span className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-800">from Prolific</span>}
+            {!raterLocked && (
+              <button className="text-sm px-3 py-2 rounded-md border" onClick={() => setRaterId(randomRaterId())} title="(For testing only)">
+                Randomize
+              </button>
+            )}
           </div>
+
           <div className="flex items-center justify-between">
             <button className="px-3 py-2 rounded-lg border" onClick={onClearAll}>Clear all data</button>
-            <button className={`px-4 py-2 rounded-lg ${prolificId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
-                    disabled={!prolificId} onClick={onStart}>
+            <button className={`px-4 py-2 rounded-lg ${raterId ? "bg-black text-white" : "bg-neutral-200 text-neutral-500"}`}
+                    disabled={!raterId} onClick={onStart}>
               Start rating ▶
             </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Thank-you screen with Prolific return button
+    function ThankYouScreen({ onRestart, onClearAll }) {
+      return (
+        <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
+          <h1 className="text-2xl font-semibold mb-2">Thank you! 🎉</h1>
+          <p className="text-sm text-neutral-700 mb-6">Your ratings were submitted successfully.</p>
+          <a
+            href="https://app.prolific.com/submissions/complete?cc=CF8X52JX"
+            className="inline-block px-6 py-3 rounded-lg bg-emerald-600 text-white text-base font-medium hover:bg-emerald-700"
+          >
+            Return to Prolific
+          </a>
+          <div className="flex items-center justify-center gap-3 mt-6">
+            <button className="px-3 py-2 rounded-lg border" onClick={onRestart}>Start over (keep data)</button>
+            <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={onClearAll} title="Clears rater id, annotations, and randomized set order for this study">
+              Clear all data & restart
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Header
+    function HeaderBar({ phase, study, progressText, raterId, setRaterId, onSubmit, onClearAll, showInstr, setShowInstr, canSubmit }) {
+      return (
+        <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="text-lg font-semibold">3D Consistency Rater</div>
+              <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
+              <div className="text-xs text-neutral-500">{progressText}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              {phase === 'rate' && (
+                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={() => setShowInstr(!showInstr)}>
+                  {showInstr ? "Hide instructions" : "Show instructions"}
+                </button>
+              )}
+              <input className="text-sm px-2 py-1.5 rounded-md border w-48" placeholder="Prolific ID" value={raterId} onChange={(e) => setRaterId(e.target.value)} />
+              <button className="text-sm px-3 py-1.5 rounded-md border" onClick={onClearAll}>Clear all data</button>
+              <button
+                className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
+                disabled={!raterId || ENDPOINT.includes("PASTE_")}
+                onClick={onSubmit}
+                title={ENDPOINT.includes("PASTE_") ? "Set ENDPOINT in code first" : "Submit to Google Sheet"}
+              >
+                Submit
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -570,59 +673,69 @@
       const [setTab, setSetTab] = useState(0);
       const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
       const [activePairId, setActivePairId] = useState(null);
-
-      const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
-
-      // Prolific ID handling
-      const prolificFromQuery = getProlificIdFromQuery();
-      const [raterId, setRaterId] = useState(() => {
-        // Prefer PROLIFIC_PID from URL; otherwise keep what was saved; otherwise blank.
-        const saved = localStorage.getItem('mv3d_rater_id');
-        const initial = (prolificFromQuery || (saved && saved.trim())) || "";
-        return initial;
-      });
-      const prolificLocked = !!prolificFromQuery;
-
-      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
-
       const [loadingConfig, setLoadingConfig] = useState(false);
       const [configError, setConfigError] = useState(null);
       const [configSource, setConfigSource] = useState(null);
 
+      const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
+      const [showInstr, setShowInstr] = useState(false);
+
+      // Prolific ID (from URL if present, otherwise editable)
+      const pidFromUrl = getProlificPID();
+      const [raterId, setRaterId] = useState(() => {
+        const saved = localStorage.getItem('mv3d_rater_id');
+        const base = saved && saved.trim() ? saved : (pidFromUrl || "");
+        return base;
+      });
+      const raterLocked = !!pidFromUrl;
+
+      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
+
+      // NEW: first-seen timestamps state (persisted)
+      const [firstSeen, setFirstSeen] = useState(() => {
+        try {
+          const s = localStorage.getItem(VIEWED_KEY(SAMPLE_STUDY.studyId));
+          return s ? JSON.parse(s) : {};
+        } catch { return {}; }
+      });
+
+      // tick to update countdowns
+      const [, setTick] = useState(0);
+      useEffect(() => {
+        const id = setInterval(() => setTick(t => t + 1), 1000);
+        return () => clearInterval(id);
+      }, []);
+
+      // Persist
       useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId || ""); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
-
-      // Load external study: ?config=<url> or fallback to ./study.json
       useEffect(() => {
+        try { localStorage.setItem(VIEWED_KEY(study.studyId), JSON.stringify(firstSeen)); } catch {}
+      }, [firstSeen, study.studyId]);
+
+      // optional external config
+      useEffect(() => {
+        const url = getConfigParam();
+        if (!url) return;
         let cancelled = false;
-        const tryLoad = async () => {
-          const urlParam = getConfigParam();
-          const candidates = urlParam ? [urlParam] : ['study.json'];
-          for (const url of candidates) {
-            try {
-              setLoadingConfig(true); setConfigError(null);
-              const res = await fetch(url, { cache: 'no-store' });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              const json = await res.json();
-              if (cancelled) return;
-              if (json && json.scenes && json.setNames) {
-                setStudy(json);
-                setAnnos(loadInitialAnnos(json));
-                setSceneIdx(0); setSetTab(0); setActivePairId(null);
-                setUiOrder(buildOrLoadUiOrder(json));
-                setConfigSource(url);
-                break;
-              }
-            } catch (e) {
-              if (!urlParam) { /* ignore error, keep SAMPLE_STUDY */ }
-              else setConfigError(String(e));
-            } finally {
-              setLoadingConfig(false);
+        (async () => {
+          try {
+            setLoadingConfig(true);
+            setConfigError(null);
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (!cancelled) {
+              onImport(json);
+              setConfigSource(url);
             }
+          } catch (err) {
+            if (!cancelled) setConfigError(String(err));
+          } finally {
+            if (!cancelled) setLoadingConfig(false);
           }
-        };
-        tryLoad();
+        })();
         return () => { cancelled = true; };
       }, []);
 
@@ -630,11 +743,9 @@
       const currentScene = study.scenes[sceneIdx];
       const order = (uiOrder[currentScene.sceneId] || [0, 1]);
       const setDef = currentScene.sets[order[setTab]];
+      const otherSetDef = currentScene.sets[order[1 - setTab]];
       const sceneAnno = (annos[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} });
       const setAnno = (sceneAnno.sets[setDef.setId] || { setId: setDef.setId, noInconsistencies: false, pairs: [] });
-
-      const setAnnoRef = useRef(setAnno);
-      useEffect(() => { setAnnoRef.current = setAnno; }, [setAnno]);
 
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
@@ -652,6 +763,7 @@
         return blank;
       }
 
+      // helper to mutate just the current set
       function mutateCurrentSet(mutator) {
         setAnnos(prev => {
           const scId = currentScene.sceneId;
@@ -666,44 +778,14 @@
         });
       }
 
-      const verifyPairReady = (pid) => {
-        if (!pid) return false;
-        const p = (setAnnoRef.current.pairs || []).find(x => x.pairId === pid);
-        return !!p && (p.rects?.length || 0) < 2;
-      };
-
-      const createNewPair = () => {
-        const id = uid();
+      // New pair (explicit only)
+      const onNewPair = () => {
         mutateCurrentSet(set => {
+          const id = uid();
           const color = COLORS[set.pairs.length % COLORS.length];
-          return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
-        });
-        setActivePairId(id);
-      };
-
-      const commitRect = (pairId, rect) => {
-        mutateCurrentSet(set => {
-          const pairs = [...set.pairs];
-          const idx = pairs.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return set;
-          const p = pairs[idx];
-          const count = p.rects?.length || 0;
-          if (count >= 2) return set;
-          pairs[idx] = { ...p, rects: [...p.rects, rect].slice(0,2) };
-          return { ...set, pairs, noInconsistencies: false };
-        });
-      };
-
-      const updateRect = (pairId, rectIndex, newRect) => {
-        mutateCurrentSet(set => {
-          const pairs = [...set.pairs];
-          const idx = pairs.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return set;
-          const p = pairs[idx];
-          const rects = [...p.rects];
-          rects[rectIndex] = newRect;
-          pairs[idx] = { ...p, rects };
-          return { ...set, pairs };
+          const p = { pairId: id, color, label: "", visible: true, rects: [] };
+          setActivePairId(id);
+          return { ...set, noInconsistencies: false, pairs: [...set.pairs, p] };
         });
       };
 
@@ -719,6 +801,60 @@
         mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,label}:p) }));
       }
 
+      function handleFinishRect(pairId, rect) {
+        let resultingLen = 0;
+        mutateCurrentSet(set => {
+          const idx = set.pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set; // must create via New pair
+          const p = set.pairs[idx];
+          const currLen = p.rects?.length ?? 0;
+          if (currLen >= 2) return set;
+          const rects = [...p.rects, rect].slice(0, 2);
+          resultingLen = rects.length;
+          const nextPairs = set.pairs.slice(); nextPairs[idx] = { ...p, rects };
+          return { ...set, pairs: nextPairs, noInconsistencies: false };
+        });
+        if (resultingLen >= 2) setActivePairId(null);
+      }
+
+      function onUpdateRect(pairId, rectIndex, newRect) {
+        mutateCurrentSet(set => {
+          const idx = set.pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set;
+          const p = set.pairs[idx];
+          const rects = [...(p.rects || [])];
+          rects[rectIndex] = newRect;
+          const nextPairs = set.pairs.slice(); nextPairs[idx] = { ...p, rects };
+          return { ...set, pairs: nextPairs };
+        });
+      }
+
+      function onImport(json) {
+        if (json && json.scenes && json.setNames) {
+          setStudy(json);
+          setAnnos(loadInitialAnnos(json));
+          setSceneIdx(0);
+          setSetTab(0);
+          setActivePairId(null);
+          setUiOrder(buildOrLoadUiOrder(json));
+          setFirstSeen({}); // reset timers for a new study config
+        } else if (json && json.studyId && typeof json === "object") {
+          if (json.annos) setAnnos(json.annos);
+          if (json.study) {
+            setStudy(json.study);
+            setUiOrder(buildOrLoadUiOrder(json.study));
+          }
+        } else {
+          alert("Unrecognized JSON format.");
+        }
+      }
+
+      function onExport() {
+        const payload = { study, annos, exportedAt: new Date().toISOString(), uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS };
+        download(`${study.studyId}__results.json`, pretty(payload));
+      }
+
+      // Completion rule (unchanged)
       function canProceedScene(sceneIndex = sceneIdx) {
         const sc = study.scenes[sceneIndex];
         const savedScene = annos[sc.sceneId];
@@ -730,10 +866,44 @@
         const ok = (a) => !!a && (a.noInconsistencies === true || (Array.isArray(a.pairs) && a.pairs.some((p) => Array.isArray(p.rects) && p.rects.length === 2)));
         return ok(a0) && ok(a1);
       }
+
       function allScenesComplete() {
         if (!study || !Array.isArray(study.scenes)) return false;
         return study.scenes.every((_, i) => canProceedScene(i));
       }
+
+      // === NEW: viewing-time logic ===
+      // Record first-seen when a set is shown for the first time
+      useEffect(() => {
+        const scId = currentScene.sceneId;
+        const setId = setDef.setId;
+        setFirstSeen(prev => {
+          const curr = prev[scId]?.[setId];
+          if (curr) return prev; // already has timestamp
+          const now = Date.now();
+          const next = { ...prev };
+          next[scId] = { ...(prev[scId] || {}), [setId]: now };
+          return next;
+        });
+      }, [sceneIdx, setTab, study, uiOrder]); // fires when set changes
+
+      // Compute remaining seconds per set in current scene
+      const timeGate = (() => {
+        const scId = currentScene.sceneId;
+        const setIds = currentScene.sets.map(s => s.setId);
+        const labels = HIDDEN_SET_LABELS; // "Set A" / "Set B" in the shuffled order
+        const now = Date.now();
+
+        const per = setIds.map((sid, i) => {
+          const t0 = firstSeen?.[scId]?.[sid] || null;
+          const elapsed = t0 ? Math.floor((now - t0) / 1000) : 0;
+          const remain = Math.max(0, MIN_VIEW_SECS - elapsed);
+          return { label: labels[i], done: remain <= 0, remain };
+        });
+        const allDone = per.every(p => p.done);
+        return { perSetStatus: per, allDone };
+      })();
+
       function gotoNextScene() {
         if (sceneIdx < study.scenes.length - 1) {
           setSceneIdx(sceneIdx + 1);
@@ -759,20 +929,14 @@
             return;
           }
           const fd = new FormData();
-          fd.append('raterId', raterId); // Prolific ID
+          fd.append('raterId', raterId);
           fd.append('studyId', study.studyId);
-          // Optionally include STUDY_ID/SESSION_ID for your sheet if present
-          const prolificStudy = getProlificParam("STUDY_ID");
-          const prolificSession = getProlificParam("SESSION_ID");
-          if (prolificStudy) fd.append('prolificStudyId', prolificStudy);
-          if (prolificSession) fd.append('prolificSessionId', prolificSession);
-
           fd.append('payload', JSON.stringify({
-            study, annos, exportedAt: new Date().toISOString(),
-            uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS,
-            prolificPid: raterId,
-            prolificStudyId: prolificStudy || null,
-            prolificSessionId: prolificSession || null,
+            study,
+            annos,
+            exportedAt: new Date().toISOString(),
+            uiOrderByScene: uiOrder,
+            hiddenSetLabels: HIDDEN_SET_LABELS
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
           setPhase('thanks');
@@ -783,20 +947,23 @@
       }
 
       function clearAllData() {
-        if (!confirm('This will clear your Prolific ID and ALL saved annotations for this study on this device. Continue?')) return;
+        if (!confirm('This will clear your Prolific ID and ALL saved annotations/timers for this study on this device. Continue?')) return;
         try {
           localStorage.removeItem('mv3d_rater_id');
           localStorage.removeItem('mv3d_phase');
           localStorage.removeItem(LS_KEY(study.studyId));
           localStorage.removeItem(ORDER_KEY(study.studyId));
+          localStorage.removeItem(VIEWED_KEY(study.studyId));
         } catch {}
-        setRaterId(prolificFromQuery || ""); // respect Prolific-supplied lock
+        setRaterId(pidFromUrl || "");
         setAnnos(loadInitialAnnos(study));
         setSceneIdx(0);
         setSetTab(0);
         setActivePairId(null);
         setPhase('intro');
         setUiOrder(buildOrLoadUiOrder(study));
+        setShowInstr(false);
+        setFirstSeen({});
         alert('Cleared. You can start fresh.');
       }
 
@@ -808,78 +975,54 @@
 
       return (
         <div className="min-h-screen bg-neutral-50 text-neutral-900">
-          {/* Header */}
-          <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
-            <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="text-lg font-semibold">3D Consistency Rater</div>
-                <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
-                <div className="text-xs text-neutral-500">{progressText}</div>
-                {configSource && <div className="text-xs text-emerald-700">Loaded: <code>{configSource}</code></div>}
-                {configError && <div className="text-xs text-red-600">Config error: {String(configError)}</div>}
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  className={`text-sm px-2 py-1.5 rounded-md border w-44 ${prolificLocked ? "bg-neutral-100" : ""}`}
-                  placeholder="Prolific ID"
-                  value={raterId}
-                  onChange={(e) => !prolificLocked && setRaterId(e.target.value)}
-                  readOnly={prolificLocked}
-                  title={prolificLocked ? "Provided by Prolific" : "Enter your Prolific ID"}
-                />
-                {prolificLocked && <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">from Prolific</span>}
-                <button className="text-sm px-3 py-1.5 rounded-md border" onClick={clearAllData}>Clear all data</button>
-                {phase === 'rate' && (
-                  <button
-                    className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
-                    disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
-                    onClick={submitToServer}
-                  >
-                    Submit
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          <HeaderBar
+            phase={phase}
+            study={study}
+            progressText={progressText}
+            raterId={raterId}
+            setRaterId={setRaterId}
+            onSubmit={submitToServer}
+            onClearAll={clearAllData}
+            showInstr={showInstr}
+            setShowInstr={setShowInstr}
+            canSubmit={canSubmit}
+          />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
-            {phase === 'intro' && (
+            {loadingConfig && (
+              <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
+                Loading study config from URL…
+              </div>
+            )}
+            {configSource && !loadingConfig && !configError && (
+              <div className="mb-3 p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
+                Loaded config from <code className="break-all">{configSource}</code>
+              </div>
+            )}
+            {configError && (
+              <div className="mb-3 p-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-800">
+                Failed to load config from URL. {String(configError)}
+              </div>
+            )}
+
+            {phase === 'intro' ? (
               <IntroScreen
                 study={study}
-                prolificId={raterId}
-                setProlificId={setRaterId}
-                locked={prolificLocked}
+                raterId={raterId}
+                setRaterId={setRaterId}
+                raterLocked={raterLocked}
                 onStart={() => setPhase('rate')}
                 onClearAll={clearAllData}
               />
-            )}
-
-            {phase === 'thanks' && (
-              <div className="max-w-xl mx-auto mt-16 p-6 rounded-2xl border bg-white shadow-sm text-center">
-                <h1 className="text-2xl font-semibold mb-2">Thank you! 🎉</h1>
-                <p className="text-sm text-neutral-700 mb-6">
-                  Your ratings were submitted successfully. If you came from Prolific,
-                  click the button below to complete your submission.
-                </p>
-                <div className="flex flex-col items-center gap-3">
-                  <a
-                    href={PROLIFIC_COMPLETION_URL}
-                    className="inline-block w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
-                  >
-                    Return to Prolific & Complete
-                  </a>
-                  <div className="flex items-center justify-center gap-3 mt-2">
-                    <button className="px-3 py-2 rounded-lg border" onClick={() => setPhase('intro')}>Start over (keep data)</button>
-                    <button className="px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200" onClick={clearAllData}>
-                      Clear all data & restart
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {phase === 'rate' && (
+            ) : phase === 'thanks' ? (
+              <ThankYouScreen
+                onRestart={() => { setPhase('intro'); setShowInstr(false); }}
+                onClearAll={clearAllData}
+              />
+            ) : (
               <>
+                {showInstr && <InstructionsPanel />}
+
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold mr-3">
                     Scene {sceneIdx + 1}: {study.scenes[sceneIdx].title}
@@ -898,39 +1041,33 @@
                 <div className="flex flex-col lg:flex-row gap-4 items-start">
                   <div className="flex-1 w-full">
                     <SetViewer
-                      setDef={currentScene.sets[order[setTab]]}
+                      setDef={setDef}
                       anno={setAnno}
                       activePairId={activePairId}
-                      verifyPairReady={verifyPairReady}
-                      commitRect={commitRect}
-                      updateRect={updateRect}
+                      onFinishRect={handleFinishRect}
+                      onUpdateRect={onUpdateRect}
                     />
                   </div>
                   <Sidebar
                     setAnno={setAnno}
                     onChange={(upd) => mutateCurrentSet(() => upd)}
-                    onNewPair={createNewPair}
+                    onNewPair={onNewPair}
                     onDeletePair={deletePair}
                     onTogglePair={togglePair}
                     onLabelPair={labelPair}
                     activePairId={activePairId}
                     setActivePairId={setActivePairId}
-                    canFinishScene={(() => {
-                      const sc = study.scenes[sceneIdx];
-                      const saved = annos[sc.sceneId]; if (!saved) return false;
-                      const a = saved.sets[sc.sets[0].setId], b = saved.sets[sc.sets[1].setId];
-                      const ok = (x) => x && (x.noInconsistencies || (x.pairs||[]).some(p => (p.rects||[]).length === 2));
-                      return ok(a) && ok(b);
-                    })()}
-                    onNextScene={() => gotoNextScene()}
-                    onPrevScene={() => gotoPrevScene()}
+                    canFinishScene={canProceedScene()}
+                    onNextScene={gotoNextScene}
+                    onPrevScene={gotoPrevScene}
+                    timeGate={timeGate}
                   />
                 </div>
 
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs text-neutral-500">Autosaved locally under <code>{LS_KEY(study.studyId)}</code></div>
                   <div className="text-xs text-neutral-500">
-                    {canSubmit ? "All scenes complete — you can submit." : "Complete all scenes to enable Submit."}
+                    {(canSubmit && timeGate.allDone) ? "All scenes complete — you can submit." : "Complete all scenes and view timers to enable Submit."}
                   </div>
                 </div>
               </>
