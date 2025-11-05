@@ -28,7 +28,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-presets="env,react">
-    const { useEffect, useMemo, useState } = React;
+    const { useEffect, useMemo, useState, useRef, useCallback } = React;
 
     // ======= CONFIG =======
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
@@ -125,33 +125,34 @@
       el.remove();
     }
 
-    // ======= ImageBox (fractions; no race on first draw) =======
+    // ======= ImageBox (fresh implementation: dragRef to avoid stale closures) =======
     // Rect = { xf, yf, wf, hf, imageIndex } in [0..1]
-    function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onEnsurePair, onUpdateRect }) {
-      const ref = React.useRef(null);
-      const imgRef = React.useRef(null);
+    function ImageBox({ src, imageIndex, pairs, activePairId, ensurePairForDraw, commitRect, updateRect }) {
+      const rootRef = useRef(null);
+      const imgRef = useRef(null);
 
-      const [drag, setDrag] = React.useState(null); // {startX,startY,curX,curY,pairId|null}
-      const [ready, setReady] = React.useState(false);
-      const editRef = React.useRef(null);
+      const [ready, setReady] = useState(false);
+      const [draft, setDraft] = useState(null); // {x,y,w,h,color}
 
-      const DRAG_THRESH_PX = 6;
+      const dragRef = useRef(null); // {startX,startY,curX,curY,pairId|null}
 
-      const measureReady = React.useCallback(() => {
+      const DRAG_THRESH_PX = 4;
+
+      const measureReady = useCallback(() => {
         const img = imgRef.current;
         setReady(!!img && img.complete && (img.naturalWidth||0) > 1 && (img.naturalHeight||0) > 1);
       }, []);
 
-      React.useEffect(() => {
+      useEffect(() => {
         measureReady();
         const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measureReady) : null;
-        if (ro && ref.current) ro.observe(ref.current);
+        if (ro && rootRef.current) ro.observe(rootRef.current);
         window.addEventListener("resize", measureReady);
         const img = imgRef.current;
         const onLoad = () => measureReady();
         if (img) img.addEventListener("load", onLoad);
         return () => {
-          if (ro && ref.current) ro.disconnect();
+          if (ro && rootRef.current) ro.disconnect();
           window.removeEventListener("resize", measureReady);
           if (img) img.removeEventListener("load", onLoad);
         };
@@ -166,93 +167,143 @@
         const { left, top, w, h } = liveRect();
         const x = clamp(clientX - left, 0, w);
         const y = clamp(clientY - top, 0, h);
-        return { fx: x / w, fy: y / h, x, y, left, top, w, h };
+        return { fx: x / w, fy: y / h, x, y, w, h, left, top };
       };
 
-      const onBackgroundMouseDown = (e) => {
-        if (!ready) return;
-        if (e.button !== 0) return; // left click only
+      // --- Draw start
+      const onMouseDownBackground = (e) => {
+        if (!ready || e.button !== 0) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
         const { left, top, w, h } = liveRect();
-        const inside = e.clientX >= left && e.clientX <= left + w && e.clientY >= top && e.clientY <= top + h;
-        if (!inside) return;
+        if (e.clientX < left || e.clientX > left + w || e.clientY < top || e.clientY > top + h) return;
 
-        // Start a draft; DON'T create a pair yet (avoid async race)
-        setDrag({ startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId: activePairId || null });
-        window.addEventListener("mousemove", onWindowMouseMove);
-        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
+        dragRef.current = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId: activePairId || null };
+        setDraft(null);
+
+        window.addEventListener('mousemove', onWindowMouseMove);
+        window.addEventListener('mouseup', onWindowMouseUp, { once: true });
         e.preventDefault();
       };
 
+      // --- Draw move
       const onWindowMouseMove = (e) => {
-        if (drag) setDrag((d) => ({ ...d, curX: e.clientX, curY: e.clientY }));
+        const d = dragRef.current;
+        if (!d) return;
+        d.curX = e.clientX;
+        d.curY = e.clientY;
 
-        if (editRef.current) {
-          const { fx, fy } = clientToFrac(e.clientX, e.clientY);
-          const action = editRef.current;
-          const r0 = action.startRect;
-
-          let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
-          const minF = 8 / Math.max(liveRect().w, liveRect().h); // ~8px
-          if (action.mode === 'move') {
-            const start = clientToFrac(action.startClientX, action.startClientY);
-            xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
-            yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
-          } else {
-            const right = r0.xf + r0.wf;
-            const bottom = r0.yf + r0.hf;
-            if (action.handle === 'nw') {
-              xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF);
-              wf = right - xf; hf = bottom - yf;
-            } else if (action.handle === 'ne') {
-              xf = r0.xf;
-              const newRight = clamp(fx, r0.xf + minF, 1);
-              wf = newRight - r0.xf;
-              yf = clamp(fy, 0, bottom - minF); hf = bottom - yf;
-            } else if (action.handle === 'sw') {
-              yf = r0.yf;
-              const newBottom = clamp(fy, r0.yf + minF, 1);
-              hf = newBottom - r0.yf;
-              xf = clamp(fx, 0, right - minF); wf = right - xf;
-            } else if (action.handle === 'se') {
-              xf = r0.xf; yf = r0.yf;
-              const newRight = clamp(fx, r0.xf + minF, 1);
-              const newBottom = clamp(fy, r0.yf + minF, 1);
-              wf = newRight - r0.xf; hf = newBottom - r0.yf;
-            }
-          }
-          xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
-          wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
-          onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
+        const w = Math.abs(d.curX - d.startX);
+        const h = Math.abs(d.curY - d.startY);
+        if (Math.max(w, h) < DRAG_THRESH_PX) {
+          setDraft(null);
+          return;
         }
+        const bounds = imgRef.current?.getBoundingClientRect();
+        if (!bounds) return;
+        const x = Math.min(d.startX, d.curX) - bounds.left;
+        const y = Math.min(d.startY, d.curY) - bounds.top;
+
+        const activeColor =
+          (pairs.find(p => p.pairId === (d.pairId || activePairId)) || {}).color
+          || "#000";
+
+        setDraft({
+          x: clamp(x, 0, bounds.width),
+          y: clamp(y, 0, bounds.height),
+          w: clamp(w, 0, bounds.width),
+          h: clamp(h, 0, bounds.height),
+          color: activeColor,
+        });
       };
 
+      // --- Draw end
       const onWindowMouseUp = () => {
-        if (drag) {
-          const { startX, startY, curX, curY } = drag;
-          const movedX = Math.abs(curX - startX);
-          const movedY = Math.abs(curY - startY);
-          const movedEnough = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
+        const d = dragRef.current;
+        window.removeEventListener('mousemove', onWindowMouseMove);
 
-          if (movedEnough) {
-            const a = clientToFrac(Math.min(startX, curX), Math.min(startY, curY));
-            const b = clientToFrac(Math.max(startX, curX), Math.max(startY, curY));
-            const xf = clamp(a.fx, 0, 1 - 1e-6);
-            const yf = clamp(a.fy, 0, 1 - 1e-6);
-            const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
-            const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+        if (!d) return;
+        const movedX = Math.abs(d.curX - d.startX);
+        const movedY = Math.abs(d.curY - d.startY);
+        const valid = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
 
-            // Ensure we have a pair *now* (create if missing), then append the rect
-            const ensuredPairId = onEnsurePair(drag.pairId);
-            if (ensuredPairId) {
-              onFinishRect && onFinishRect(ensuredPairId, { xf, yf, wf, hf, imageIndex });
-            }
-          }
-          setDrag(null);
+        if (valid) {
+          const a = clientToFrac(Math.min(d.startX, d.curX), Math.min(d.startY, d.curY));
+          const b = clientToFrac(Math.max(d.startX, d.curX), Math.max(d.startY, d.curY));
+          const xf = clamp(a.fx, 0, 1 - 1e-6);
+          const yf = clamp(a.fy, 0, 1 - 1e-6);
+          const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
+          const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+          const ensuredPairId = ensurePairForDraw(d.pairId);
+          commitRect(ensuredPairId, { xf, yf, wf, hf, imageIndex });
         }
+
+        dragRef.current = null;
+        setDraft(null);
+      };
+
+      // --- Move/resize existing rectangles
+      const editRef = useRef(null); // { pairId, rectIndex, mode, handle, startRect, startClientX, startClientY }
+
+      const startMoveRect = (e, pairId, rectIndex, rect) => {
+        e.stopPropagation(); e.preventDefault();
+        editRef.current = { pairId, rectIndex, mode: 'move', startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
+        window.addEventListener('mousemove', onEditMove);
+        window.addEventListener('mouseup', onEditEnd, { once: true });
+      };
+
+      const startResizeRect = (e, pairId, rectIndex, rect, handle) => {
+        e.stopPropagation(); e.preventDefault();
+        editRef.current = { pairId, rectIndex, mode: 'resize', handle, startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY };
+        window.addEventListener('mousemove', onEditMove);
+        window.addEventListener('mouseup', onEditEnd, { once: true });
+      };
+
+      const onEditMove = (e) => {
+        const action = editRef.current;
+        if (!action) return;
+
+        const { fx, fy } = clientToFrac(e.clientX, e.clientY);
+        const r0 = action.startRect;
+
+        let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
+        const minF = 8 / Math.max(liveRect().w, liveRect().h);
+
+        if (action.mode === 'move') {
+          const start = clientToFrac(action.startClientX, action.startClientY);
+          xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
+          yf = clamp(r0.yf + (fy - start.fy), 0, 1 - r0.hf);
+        } else {
+          const right = r0.xf + r0.wf;
+          const bottom = r0.yf + r0.hf;
+          if (action.handle === 'nw') {
+            xf = clamp(fx, 0, right - minF); yf = clamp(fy, 0, bottom - minF);
+            wf = right - xf; hf = bottom - yf;
+          } else if (action.handle === 'ne') {
+            xf = r0.xf;
+            const newRight = clamp(fx, r0.xf + minF, 1);
+            wf = newRight - r0.xf;
+            yf = clamp(fy, 0, bottom - minF); hf = bottom - yf;
+          } else if (action.handle === 'sw') {
+            yf = r0.yf;
+            const newBottom = clamp(fy, r0.yf + minF, 1);
+            hf = newBottom - r0.yf;
+            xf = clamp(fx, 0, right - minF); wf = right - xf;
+          } else if (action.handle === 'se') {
+            const newRight = clamp(fx, r0.xf + minF, 1);
+            const newBottom = clamp(fy, r0.yf + minF, 1);
+            wf = newRight - r0.xf; hf = newBottom - r0.yf;
+          }
+        }
+
+        xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
+        wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
+        updateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
+      };
+
+      const onEditEnd = () => {
+        window.removeEventListener('mousemove', onEditMove);
         editRef.current = null;
-        window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
       const toClientStyle = (r) => ({
@@ -262,46 +313,13 @@
         height: `${r.hf * 100}%`,
       });
 
-      const onRectMouseDown = (e, pairId, absIndex, rect) => {
-        e.stopPropagation();
-        e.preventDefault();
-        editRef.current = {
-          pairId, rectIndex: absIndex, mode: 'move',
-          startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY
-        };
-        window.addEventListener("mousemove", onWindowMouseMove);
-        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
-      };
-
-      const onHandleMouseDown = (e, pairId, absIndex, rect, handle) => {
-        e.stopPropagation();
-        e.preventDefault();
-        editRef.current = {
-          pairId, rectIndex: absIndex, mode: 'resize', handle,
-          startRect: { ...rect }, startClientX: e.clientX, startClientY: e.clientY
-        };
-        window.addEventListener("mousemove", onWindowMouseMove);
-        window.addEventListener("mouseup", onWindowMouseUp, { once: true });
-      };
-
       const rectsForThisImage = (p) =>
         (p.rects || []).map((r, absIndex) => ({ r, absIndex })).filter(({ r }) => r.imageIndex === imageIndex);
 
-      // Draft only if above threshold
-      const draftBox = drag ? (() => {
-        const r = imgRef.current?.getBoundingClientRect(); if (!r) return null;
-        const w = Math.abs(drag.curX - drag.startX);
-        const h = Math.abs(drag.curY - drag.startY);
-        if (Math.max(w, h) < DRAG_THRESH_PX) return null;
-        const x = Math.min(drag.startX, drag.curX) - r.left;
-        const y = Math.min(drag.startY, drag.curY) - r.top;
-        return { x: Math.max(0, x), y: Math.max(0, y), w, h };
-      })() : null;
-
       return (
         <div
-          ref={ref}
-          onMouseDown={onBackgroundMouseDown}
+          ref={rootRef}
+          onMouseDown={onMouseDownBackground}
           className="relative w-full select-none bg-white rounded-xl overflow-hidden"
           title={ready ? "Click-drag to draw a rectangle" : "Loading image…"}
         >
@@ -321,33 +339,33 @@
                     color,
                     background: p.pairId === activePairId ? `${color}22` : "transparent",
                   }}
-                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
+                  onMouseDown={(e) => startMoveRect(e, p.pairId, absIndex, r)}
                 >
                   <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: color }}>
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
                   <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
+                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'nw')}></div>
                   <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
+                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'ne')}></div>
                   <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
+                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'sw')}></div>
                   <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
+                       onMouseDown={(e)=>startResizeRect(e, p.pairId, absIndex, r, 'se')}></div>
                 </div>
               );
             })
           )}
 
-          {draftBox && (
+          {draft && (
             <div
               className="absolute border-2 border-dashed pointer-events-none"
               style={{
-                left: draftBox.x,
-                top: draftBox.y,
-                width: draftBox.w,
-                height: draftBox.h,
-                borderColor: ((pairs.find((p) => p.pairId === (drag?.pairId || activePairId)) || {}).color) || "#000",
+                left: draft.x,
+                top: draft.y,
+                width: draft.w,
+                height: draft.h,
+                borderColor: draft.color,
               }}
             />
           )}
@@ -355,7 +373,7 @@
       );
     }
 
-    function SetViewer({ setDef, anno, onFinishRect, activePairId, onEnsurePair, onUpdateRect }) {
+    function SetViewer({ setDef, anno, activePairId, ensurePairForDraw, commitRect, updateRect }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
@@ -365,9 +383,9 @@
                 imageIndex={idx}
                 pairs={(anno.pairs || []).filter((p) => p.visible)}
                 activePairId={activePairId}
-                onFinishRect={onFinishRect}
-                onEnsurePair={onEnsurePair}
-                onUpdateRect={onUpdateRect}
+                ensurePairForDraw={ensurePairForDraw}
+                commitRect={commitRect}
+                updateRect={updateRect}
               />
             </div>
           ))}
@@ -467,7 +485,7 @@
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
 
-      const ensurePair = (maybeId) => {
+      const ensurePairForDraw = (maybeId) => {
         // If we already have a pair id, ensure it exists; otherwise create one and return it.
         if (maybeId && pairs.some(p => p.pairId === maybeId)) return maybeId;
         const id = uid();
@@ -477,18 +495,15 @@
         return id;
       };
 
-      const onFinishRect = (pairId, rect) => {
-        let nextActive = pairId;
+      const commitRect = (pairId, rect) => {
         setPairs(prev => prev.map(p => {
           if (p.pairId !== pairId) return p;
           const rects = [...p.rects, rect];
-          if (rects.length >= 2) nextActive = null;
           return { ...p, rects };
         }));
-        setActivePairId(nextActive);
       };
 
-      const onUpdateRect = (pairId, rectIndex, newRect) => {
+      const updateRect = (pairId, rectIndex, newRect) => {
         setPairs(prev => prev.map(p => {
           if (p.pairId !== pairId) return p;
           const rects = [...p.rects]; rects[rectIndex] = newRect;
@@ -510,7 +525,7 @@
           <div className="flex items-center justify-between mb-2">
             <div className="font-semibold">Practice area (try it here)</div>
             <div className="flex gap-2">
-              <button className="text-xs px-2 py-1 rounded-md border" onClick={() => setActivePairId(ensurePair(null))}>New pair</button>
+              <button className="text-xs px-2 py-1 rounded-md border" onClick={() => setActivePairId(ensurePairForDraw(null))}>New pair</button>
               <button className="text-xs px-2 py-1 rounded-md border" onClick={reset}>Clear</button>
             </div>
           </div>
@@ -518,12 +533,12 @@
             setDef={setDef}
             anno={{ pairs }}
             activePairId={activePairId}
-            onFinishRect={onFinishRect}
-            onEnsurePair={ensurePair}
-            onUpdateRect={onUpdateRect}
+            ensurePairForDraw={ensurePairForDraw}
+            commitRect={commitRect}
+            updateRect={updateRect}
           />
           <div className="text-xs text-neutral-600 mt-2">
-            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
+            Tip: click-drag to draw; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
           </div>
         </div>
       );
@@ -701,7 +716,7 @@
         return blank;
       }
 
-      // helper to mutate just the current set (functional & safe)
+      // helper to mutate just the current set
       function mutateCurrentSet(mutator) {
         setAnnos(prev => {
           const scId = currentScene.sceneId;
@@ -716,7 +731,7 @@
         });
       }
 
-      // Ensure a pair exists; if not, create and return its id
+      // Ensure a pair exists; if not, create and return its id (synchronous w.r.t. returned value)
       const ensurePairForDraw = (maybeId) => {
         let ensuredId = maybeId;
         mutateCurrentSet(set => {
@@ -726,12 +741,36 @@
           }
           const id = maybeId || uid();
           const color = COLORS[set.pairs.length % COLORS.length];
-          const p = { pairId: id, color, label: "", visible: true, rects: [] };
           ensuredId = id;
-          return { ...set, noInconsistencies: false, pairs: [...set.pairs, p] };
+          return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
         });
         setActivePairId(ensuredId);
         return ensuredId;
+      };
+
+      // Commit a rectangle to a pair
+      const commitRect = (pairId, rect) => {
+        mutateCurrentSet(set => {
+          const pairs = [...set.pairs];
+          const idx = pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set; // shouldn't happen thanks to ensure
+          const p = pairs[idx];
+          pairs[idx] = { ...p, rects: [...p.rects, rect] };
+          return { ...set, pairs, noInconsistencies: false };
+        });
+      };
+
+      const updateRect = (pairId, rectIndex, newRect) => {
+        mutateCurrentSet(set => {
+          const pairs = [...set.pairs];
+          const idx = pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set;
+          const p = pairs[idx];
+          const rects = [...p.rects];
+          rects[rectIndex] = newRect;
+          pairs[idx] = { ...p, rects };
+          return { ...set, pairs };
+        });
       };
 
       function deletePair(pairId) {
@@ -744,41 +783,6 @@
       }
       function labelPair(pairId, label) {
         mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,label}:p) }));
-      }
-
-      function handleFinishRect(pairId, rect) {
-        let newLen = 0;
-        mutateCurrentSet(set => {
-          let idx = set.pairs.findIndex(p => p.pairId === pairId);
-          let pairs = [...set.pairs];
-          if (idx < 0) {
-            // If the pair doesn't exist yet, create it and insert the rect now (no race).
-            const color = COLORS[pairs.length % COLORS.length];
-            pairs.push({ pairId, color, label: "", visible: true, rects: [rect] });
-            newLen = 1;
-            return { ...set, pairs, noInconsistencies: false };
-          } else {
-            const p = pairs[idx];
-            if ((p.rects || []).length >= 2) return set;
-            const updated = { ...p, rects: [...(p.rects || []), rect] };
-            newLen = updated.rects.length;
-            pairs[idx] = updated;
-            return { ...set, pairs, noInconsistencies: false };
-          }
-        });
-        if (newLen >= 2) setActivePairId(null);
-      }
-
-      function onUpdateRect(pairId, rectIndex, newRect) {
-        mutateCurrentSet(set => {
-          const idx = set.pairs.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return set;
-          const p = set.pairs[idx];
-          const rects = [...(p.rects || [])];
-          rects[rectIndex] = newRect;
-          const nextPairs = set.pairs.slice(); nextPairs[idx] = { ...p, rects };
-          return { ...set, pairs: nextPairs };
-        });
       }
 
       function onImport(json) {
@@ -959,9 +963,9 @@
                       setDef={setDef}
                       anno={setAnno}
                       activePairId={activePairId}
-                      onFinishRect={handleFinishRect}
-                      onEnsurePair={ensurePairForDraw}
-                      onUpdateRect={onUpdateRect}
+                      ensurePairForDraw={ensurePairForDraw}
+                      commitRect={commitRect}
+                      updateRect={updateRect}
                     />
                   </div>
                   <Sidebar
