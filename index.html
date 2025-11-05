@@ -125,9 +125,8 @@
       el.remove();
     }
 
-    // ======= ImageBox (fresh implementation: dragRef to avoid stale closures) =======
-    // Rect = { xf, yf, wf, hf, imageIndex } in [0..1]
-    function ImageBox({ src, imageIndex, pairs, activePairId, ensurePairForDraw, commitRect, updateRect }) {
+    // ======= ImageBox (dragRef + reuse-safe ensure) =======
+    function ImageBox({ src, imageIndex, pairs, activePairId, ensurePairForDraw, commitRect, updateRect, isPairFull }) {
       const rootRef = useRef(null);
       const imgRef = useRef(null);
 
@@ -135,7 +134,6 @@
       const [draft, setDraft] = useState(null); // {x,y,w,h,color}
 
       const dragRef = useRef(null); // {startX,startY,curX,curY,pairId|null}
-
       const DRAG_THRESH_PX = 4;
 
       const measureReady = useCallback(() => {
@@ -170,7 +168,6 @@
         return { fx: x / w, fy: y / h, x, y, w, h, left, top };
       };
 
-      // --- Draw start
       const onMouseDownBackground = (e) => {
         if (!ready || e.button !== 0) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
@@ -178,7 +175,12 @@
         const { left, top, w, h } = liveRect();
         if (e.clientX < left || e.clientX > left + w || e.clientY < top || e.clientY > top + h) return;
 
-        dragRef.current = { startX: e.clientX, startY: e.clientY, curX: e.clientX, curY: e.clientY, pairId: activePairId || null };
+        // if current active pair is full, we'll create a new one on mouseup
+        dragRef.current = {
+          startX: e.clientX, startY: e.clientY,
+          curX: e.clientX, curY: e.clientY,
+          pairId: isPairFull(activePairId) ? null : (activePairId || null)
+        };
         setDraft(null);
 
         window.addEventListener('mousemove', onWindowMouseMove);
@@ -186,7 +188,6 @@
         e.preventDefault();
       };
 
-      // --- Draw move
       const onWindowMouseMove = (e) => {
         const d = dragRef.current;
         if (!d) return;
@@ -217,7 +218,6 @@
         });
       };
 
-      // --- Draw end
       const onWindowMouseUp = () => {
         const d = dragRef.current;
         window.removeEventListener('mousemove', onWindowMouseMove);
@@ -234,6 +234,8 @@
           const yf = clamp(a.fy, 0, 1 - 1e-6);
           const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
           const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+
+          // Ask parent to reuse current pair if available & not full, else create a new pair.
           const ensuredPairId = ensurePairForDraw(d.pairId);
           commitRect(ensuredPairId, { xf, yf, wf, hf, imageIndex });
         }
@@ -242,8 +244,8 @@
         setDraft(null);
       };
 
-      // --- Move/resize existing rectangles
-      const editRef = useRef(null); // { pairId, rectIndex, mode, handle, startRect, startClientX, startClientY }
+      // Move/resize existing rectangles (unchanged)
+      const editRef = useRef(null);
 
       const startMoveRect = (e, pairId, rectIndex, rect) => {
         e.stopPropagation(); e.preventDefault();
@@ -260,8 +262,7 @@
       };
 
       const onEditMove = (e) => {
-        const action = editRef.current;
-        if (!action) return;
+        const action = editRef.current; if (!action) return;
 
         const { fx, fy } = clientToFrac(e.clientX, e.clientY);
         const r0 = action.startRect;
@@ -373,7 +374,7 @@
       );
     }
 
-    function SetViewer({ setDef, anno, activePairId, ensurePairForDraw, commitRect, updateRect }) {
+    function SetViewer({ setDef, anno, activePairId, ensurePairForDraw, commitRect, updateRect, isPairFull }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
           {setDef.images.map((src, idx) => (
@@ -386,6 +387,7 @@
                 ensurePairForDraw={ensurePairForDraw}
                 commitRect={commitRect}
                 updateRect={updateRect}
+                isPairFull={isPairFull}
               />
             </div>
           ))}
@@ -418,7 +420,7 @@
           <div className="p-3 rounded-xl border bg-white shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Pairs</div>
-              <button className="text-xs px-3 py-1 rounded-md border" title="N" onClick={() => onNewPair(nextColor)}>
+              <button className="text-xs px-3 py-1 rounded-md border" title="N" onClick={onNewPair}>
                 New pair (N)
               </button>
             </div>
@@ -480,25 +482,50 @@
       );
     }
 
-    // Practice panel (no persistence)
+    // Practice panel (kept for quick manual test)
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
 
+      const pairsRef = useRef(pairs);
+      useEffect(() => { pairsRef.current = pairs; }, [pairs]);
+
+      const activePairIdRef = useRef(activePairId);
+      useEffect(() => { activePairIdRef.current = activePairId; }, [activePairId]);
+
+      const isPairFull = (pid) => {
+        if (!pid) return false;
+        const p = pairsRef.current.find(x => x.pairId === pid);
+        return !!p && (p.rects?.length || 0) >= 2;
+        };
+
       const ensurePairForDraw = (maybeId) => {
-        // If we already have a pair id, ensure it exists; otherwise create one and return it.
-        if (maybeId && pairs.some(p => p.pairId === maybeId)) return maybeId;
+        // Prefer explicit id, otherwise the *latest* active id (via ref).
+        let useId = maybeId || activePairIdRef.current || null;
+        const exists = useId ? pairsRef.current.some(p => p.pairId === useId) : false;
+        const full = exists ? isPairFull(useId) : false;
+
+        if (exists && !full) {
+          setActivePairId(useId);
+          activePairIdRef.current = useId;
+          return useId;
+        }
+
+        // create a new pair
         const id = uid();
-        const color = COLORS[pairs.length % COLORS.length];
+        const color = COLORS[pairsRef.current.length % COLORS.length];
         setPairs(prev => [...prev, { pairId:id, color, label:"", visible:true, rects:[] }]);
         setActivePairId(id);
+        activePairIdRef.current = id;
         return id;
       };
 
       const commitRect = (pairId, rect) => {
         setPairs(prev => prev.map(p => {
           if (p.pairId !== pairId) return p;
-          const rects = [...p.rects, rect];
+          const count = p.rects?.length || 0;
+          if (count >= 2) return p;                   // hard cap
+          const rects = [...p.rects, rect].slice(0,2);
           return { ...p, rects };
         }));
       };
@@ -506,7 +533,8 @@
       const updateRect = (pairId, rectIndex, newRect) => {
         setPairs(prev => prev.map(p => {
           if (p.pairId !== pairId) return p;
-          const rects = [...p.rects]; rects[rectIndex] = newRect;
+          const rects = [...p.rects];
+          rects[rectIndex] = newRect;
           return { ...p, rects };
         }));
       };
@@ -536,6 +564,7 @@
             ensurePairForDraw={ensurePairForDraw}
             commitRect={commitRect}
             updateRect={updateRect}
+            isPairFull={isPairFull}
           />
           <div className="text-xs text-neutral-600 mt-2">
             Tip: click-drag to draw; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
@@ -668,37 +697,19 @@
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // optional external config
-      useEffect(() => {
-        const url = getConfigParam();
-        if (!url) return;
-        let cancelled = false;
-        (async () => {
-          try {
-            setLoadingConfig(true);
-            setConfigError(null);
-            const res = await fetch(url, { cache: 'no-store' });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const json = await res.json();
-            if (!cancelled) {
-              onImport(json);
-              setConfigSource(url);
-            }
-          } catch (err) {
-            if (!cancelled) setConfigError(String(err));
-          } finally {
-            if (!cancelled) setLoadingConfig(false);
-          }
-        })();
-        return () => { cancelled = true; };
-      }, []);
-
       // derive current
       const currentScene = study.scenes[sceneIdx];
       const order = (uiOrder[currentScene.sceneId] || [0, 1]);
       const setDef = currentScene.sets[order[setTab]];
       const sceneAnno = (annos[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} });
       const setAnno = (sceneAnno.sets[setDef.setId] || { setId: setDef.setId, noInconsistencies: false, pairs: [] });
+
+      // refs to avoid races
+      const setAnnoRef = useRef(setAnno);
+      useEffect(() => { setAnnoRef.current = setAnno; }, [setAnno]);
+
+      const activePairIdRef = useRef(activePairId);
+      useEffect(() => { activePairIdRef.current = activePairId; }, [activePairId]);
 
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
@@ -716,7 +727,6 @@
         return blank;
       }
 
-      // helper to mutate just the current set
       function mutateCurrentSet(mutator) {
         setAnnos(prev => {
           const scId = currentScene.sceneId;
@@ -731,31 +741,44 @@
         });
       }
 
-      // Ensure a pair exists; if not, create and return its id (synchronous w.r.t. returned value)
-      const ensurePairForDraw = (maybeId) => {
-        let ensuredId = maybeId;
-        mutateCurrentSet(set => {
-          if (maybeId && set.pairs.some(p => p.pairId === maybeId)) {
-            ensuredId = maybeId;
-            return set;
-          }
-          const id = maybeId || uid();
-          const color = COLORS[set.pairs.length % COLORS.length];
-          ensuredId = id;
-          return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
-        });
-        setActivePairId(ensuredId);
-        return ensuredId;
+      const isPairFull = (pid) => {
+        if (!pid) return false;
+        const p = (setAnnoRef.current.pairs || []).find(x => x.pairId === pid);
+        return !!p && (p.rects?.length || 0) >= 2;
       };
 
-      // Commit a rectangle to a pair
+      // Ensure a pair exists; reuse active if exists & not full; otherwise create new
+      const ensurePairForDraw = (maybeId) => {
+        let useId = maybeId || activePairIdRef.current || null;
+        const exists = useId ? (setAnnoRef.current.pairs || []).some(p => p.pairId === useId) : false;
+        const full = exists ? isPairFull(useId) : false;
+
+        if (exists && !full) {
+          setActivePairId(useId);
+          activePairIdRef.current = useId;
+          return useId;
+        }
+
+        // Create a new pair
+        const id = uid();
+        mutateCurrentSet(set => {
+          const color = COLORS[set.pairs.length % COLORS.length];
+          return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
+        });
+        setActivePairId(id);
+        activePairIdRef.current = id;
+        return id;
+      };
+
       const commitRect = (pairId, rect) => {
         mutateCurrentSet(set => {
           const pairs = [...set.pairs];
           const idx = pairs.findIndex(p => p.pairId === pairId);
-          if (idx < 0) return set; // shouldn't happen thanks to ensure
+          if (idx < 0) return set;
           const p = pairs[idx];
-          pairs[idx] = { ...p, rects: [...p.rects, rect] };
+          const count = p.rects?.length || 0;
+          if (count >= 2) return set; // cap at 2
+          pairs[idx] = { ...p, rects: [...p.rects, rect].slice(0,2) };
           return { ...set, pairs, noInconsistencies: false };
         });
       };
@@ -909,22 +932,6 @@
           />
 
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
-            {loadingConfig && (
-              <div className="mb-3 p-2 rounded-lg border border-blue-200 bg-blue-50 text-xs text-blue-800">
-                Loading study config from URL…
-              </div>
-            )}
-            {configSource && !loadingConfig && !configError && (
-              <div className="mb-3 p-2 rounded-lg border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
-                Loaded config from <code className="break-all">{configSource}</code>
-              </div>
-            )}
-            {configError && (
-              <div className="mb-3 p-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-800">
-                Failed to load config from URL. {String(configError)}
-              </div>
-            )}
-
             {phase === 'intro' ? (
               <IntroScreen
                 study={study}
@@ -940,8 +947,6 @@
               />
             ) : (
               <>
-                {showInstr && <InstructionsPanel />}
-
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold mr-3">
                     Scene {sceneIdx + 1}: {study.scenes[sceneIdx].title}
@@ -966,6 +971,7 @@
                       ensurePairForDraw={ensurePairForDraw}
                       commitRect={commitRect}
                       updateRect={updateRect}
+                      isPairFull={isPairFull}
                     />
                   </div>
                   <Sidebar
