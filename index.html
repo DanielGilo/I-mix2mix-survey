@@ -126,8 +126,8 @@
       el.remove();
     }
 
-    // ======= ImageBox (handles legacy pixel rects; stores fractional rects) =======
-    // Rect shape we store: { xf, yf, wf, hf, imageIndex }  (all in 0..1)
+    // ======= ImageBox: Click-drag creates rect (with threshold). Fractions storage. =======
+    // Rect: { xf, yf, wf, hf, imageIndex }  (all 0..1)
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
       const imgRef = React.useRef(null);
@@ -135,6 +135,8 @@
       const [drag, setDrag] = React.useState(null); // {startX,startY,curX,curY,pairId}
       const [ready, setReady] = React.useState(false);
       const editRef = React.useRef(null);
+
+      const DRAG_THRESH_PX = 6; // must move this much to create a rect
 
       const measureReady = React.useCallback(() => {
         const img = imgRef.current;
@@ -170,21 +172,6 @@
         return { fx: x / w, fy: y / h, x, y, left, top, w, h };
       };
 
-      // Convert a rect to fractional coords (handles legacy {x,y,w,h})
-      const normalizeRect = (r) => {
-        if (!r) return r;
-        if ('xf' in r && 'wf' in r) return r; // already fractional
-        // legacy: natural pixel coords
-        const img = imgRef.current;
-        const natW = Math.max(1, img?.naturalWidth || 1);
-        const natH = Math.max(1, img?.naturalHeight || 1);
-        const xf = clamp((r.x || 0) / natW, 0, 1 - 1e-6);
-        const yf = clamp((r.y || 0) / natH, 0, 1 - 1e-6);
-        const wf = clamp((r.w || 0) / natW, 1e-6, 1 - xf);
-        const hf = clamp((r.h || 0) / natH, 1e-6, 1 - yf);
-        return { xf, yf, wf, hf, imageIndex: r.imageIndex ?? imageIndex };
-      };
-
       const onBackgroundMouseDown = (e) => {
         if (!ready) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
@@ -209,7 +196,7 @@
         if (editRef.current) {
           const { fx, fy } = clientToFrac(e.clientX, e.clientY);
           const action = editRef.current;
-          const r0 = normalizeRect(action.startRect);
+          const r0 = action.startRect; // already fractional
 
           let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
           const minF = 8 / Math.max(liveRect().w, liveRect().h); // ~8px in fraction
@@ -237,7 +224,6 @@
               xf = r0.xf; yf = r0.yf;
               const newRight = clamp(fx, r0.xf + minF, 1);
               const newBottom = clamp(fy, r0.yf + minF, 1);
-              wf = newRight - r0.yf + (r0.yf - r0.yf); // keep hf compute below
               wf = newRight - r0.xf; hf = newBottom - r0.yf;
             }
           }
@@ -252,28 +238,32 @@
       const onWindowMouseUp = () => {
         if (drag) {
           const { startX, startY, curX, curY, pairId } = drag;
-          const a = clientToFrac(Math.min(startX, curX), Math.min(startY, curY));
-          const b = clientToFrac(Math.max(startX, curX), Math.max(startY, curY));
-          const xf = clamp(a.fx, 0, 1 - 1e-6);
-          const yf = clamp(a.fy, 0, 1 - 1e-6);
-          const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
-          const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
-          onFinishRect && onFinishRect(pairId, { xf, yf, wf, hf, imageIndex });
+          const movedX = Math.abs(curX - startX);
+          const movedY = Math.abs(curY - startY);
+          const movedEnough = (movedX >= DRAG_THRESH_PX) || (movedY >= DRAG_THRESH_PX);
+
+          if (movedEnough) {
+            const a = clientToFrac(Math.min(startX, curX), Math.min(startY, curY));
+            const b = clientToFrac(Math.max(startX, curX), Math.max(startY, curY));
+            const xf = clamp(a.fx, 0, 1 - 1e-6);
+            const yf = clamp(a.fy, 0, 1 - 1e-6);
+            const wf = clamp(b.fx - a.fx, 1e-4, 1 - xf);
+            const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
+            onFinishRect && onFinishRect(pairId, { xf, yf, wf, hf, imageIndex });
+          }
+          // If not moved enough, treat it like a simple click: do nothing.
           setDrag(null);
         }
         editRef.current = null;
         window.removeEventListener("mousemove", onWindowMouseMove);
       };
 
-      const toClientStyle = (r) => {
-        const n = normalizeRect(r);
-        return {
-          left: `${n.xf * 100}%`,
-          top: `${n.yf * 100}%`,
-          width: `${n.wf * 100}%`,
-          height: `${n.hf * 100}%`,
-        };
-      };
+      const toClientStyle = (r) => ({
+        left: `${r.xf * 100}%`,
+        top: `${r.yf * 100}%`,
+        width: `${r.wf * 100}%`,
+        height: `${r.hf * 100}%`,
+      });
 
       const onRectMouseDown = (e, pairId, absIndex, rect) => {
         e.stopPropagation();
@@ -302,23 +292,15 @@
           .map((r, absIndex) => ({ r, absIndex }))
           .filter(({ r }) => r.imageIndex === imageIndex);
 
-      // Draw-time migration: if we see a legacy rect, convert & persist
-      const maybeMigrateRect = (pairId, absIndex, r) => {
-        if (r && !('xf' in r)) {
-          const n = normalizeRect(r);
-          onUpdateRect && onUpdateRect(pairId, absIndex, n);
-          return n;
-        }
-        return r;
-      };
-
+      // Only show a draft box if we've crossed the threshold
       const draftBox = drag ? (() => {
         const r = imgRef.current?.getBoundingClientRect();
         if (!r) return null;
-        const x = Math.min(drag.startX, drag.curX) - r.left;
-        const y = Math.min(drag.startY, drag.curY) - r.top;
         const w = Math.abs(drag.curX - drag.startX);
         const h = Math.abs(drag.curY - drag.startY);
+        if (Math.max(w, h) < DRAG_THRESH_PX) return null;
+        const x = Math.min(drag.startX, drag.curX) - r.left;
+        const y = Math.min(drag.startY, drag.curY) - r.top;
         return { x: Math.max(0, x), y: Math.max(0, y), w, h };
       })() : null;
 
@@ -333,32 +315,31 @@
 
           {pairs.map((p) =>
             rectsForThisImage(p).map(({ r, absIndex }) => {
-              const rect = maybeMigrateRect(p.pairId, absIndex, r);
               const color = p.color;
               return (
                 <div
                   key={p.pairId + '-' + absIndex}
                   className="absolute box-border anno-rect"
                   style={{
-                    ...toClientStyle(rect),
+                    ...toClientStyle(r),
                     border: `3px solid ${color}`,
                     borderRadius: 8,
                     color,
                     background: p.pairId === activePairId ? `${color}22` : "transparent",
                   }}
-                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, rect)}
+                  onMouseDown={(e) => onRectMouseDown(e, p.pairId, absIndex, r)}
                 >
                   <div className="absolute -top-2 -left-2 text-xs px-1.5 py-0.5 rounded-md text-white" style={{ background: color }}>
                     {p.label || "#" + p.pairId.slice(-3)}
                   </div>
                   <div className="resize-handle handle-nw" style={{left: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'nw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'nw')}></div>
                   <div className="resize-handle handle-ne" style={{right: -6, top: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'ne')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'ne')}></div>
                   <div className="resize-handle handle-sw" style={{left: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'sw')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'sw')}></div>
                   <div className="resize-handle handle-se" style={{right: -6, bottom: -6}}
-                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, rect, 'se')}></div>
+                       onMouseDown={(e)=>onHandleMouseDown(e, p.pairId, absIndex, r, 'se')}></div>
                 </div>
               );
             })
@@ -542,7 +523,7 @@
             onUpdateRect={onUpdateRect}
           />
           <div className="text-xs text-neutral-600 mt-2">
-            Tip: draw two boxes per pair; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
+            Tip: click-drag to draw; click inside a box to <b>move</b>; drag a corner to <b>resize</b>.
           </div>
         </div>
       );
@@ -827,11 +808,7 @@
         }
       }
       function gotoPrevScene() {
-        if (sceneIdx > 0) {
-          setSceneIdx(sceneIdx - 1);
-          setSetTab(0);
-          setActivePairId(null);
-        }
+        if (sceneIdx > 0) setSceneIdx(sceneIdx - 1), setSetTab(0), setActivePairId(null);
       }
 
       async function submitToServer() {
