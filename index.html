@@ -4,14 +4,10 @@
     <meta charset="utf-8" />
     <title>3D Consistency Rater</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React 18 + ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
     <style>
       html, body, #root { height: 100%; }
       body { margin: 0; background: #fafafa; }
@@ -31,11 +27,9 @@
     <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useState } = React;
 
-    // ======= CONFIG =======
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
 
-    // ======= SAMPLE DATA =======
     const SAMPLE_STUDY = {
       studyId: "demo_study_v1",
       instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
@@ -80,24 +74,19 @@
       ],
     };
 
-    // ======= Helpers =======
+    // ===== Helpers =====
     const COLORS = ["#ff3b30","#ff9500","#ffcc00","#34c759","#00c7be","#32ade6","#5856d6","#af52de","#ff2d55","#8e8e93"];
     const uid = () => Math.random().toString(36).slice(2, 9);
-    const pretty = (obj) => JSON.stringify(obj, null, 2);
-    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const pretty = (o) => JSON.stringify(o, null, 2);
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
     const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
     const HIDDEN_SET_LABELS = ["Set A", "Set B"];
 
     function buildOrLoadUiOrder(study) {
-      try {
-        const existing = localStorage.getItem(ORDER_KEY(study.studyId));
-        if (existing) return JSON.parse(existing);
-      } catch {}
+      try { const s = localStorage.getItem(ORDER_KEY(study.studyId)); if (s) return JSON.parse(s); } catch {}
       const map = {};
-      for (const sc of study.scenes) {
-        map[sc.sceneId] = Math.random() < 0.5 ? [0, 1] : [1, 0];
-      }
+      for (const sc of study.scenes) map[sc.sceneId] = Math.random() < 0.5 ? [0,1] : [1,0];
       try { localStorage.setItem(ORDER_KEY(study.studyId), JSON.stringify(map)); } catch {}
       return map;
     }
@@ -109,25 +98,22 @@
     };
 
     function getConfigParam() {
-      try {
-        const sp = new URLSearchParams(window.location.search);
-        const u = sp.get('config');
-        return u && u.trim() ? u.trim() : null;
-      } catch { return null; }
+      try { const u = new URLSearchParams(location.search).get('config'); return u && u.trim() ? u.trim() : null; }
+      catch { return null; }
     }
 
     function download(filename, text) {
       const el = document.createElement("a");
-      el.setAttribute("href","data:text/json;charset=utf-8," + encodeURIComponent(text));
-      el.setAttribute("download", filename);
+      el.href = "data:text/json;charset=utf-8," + encodeURIComponent(text);
+      el.download = filename;
       el.style.display = "none";
       document.body.appendChild(el);
       el.click();
       el.remove();
     }
 
-    // ======= ImageBox: Click-drag creates rect (with threshold). Fractions storage. =======
-    // Rect: { xf, yf, wf, hf, imageIndex }  (all 0..1)
+    // ===== ImageBox (fractions; drag threshold; functional-safe) =====
+    // Rect = { xf, yf, wf, hf, imageIndex }  in [0..1]
     function ImageBox({ src, imageIndex, pairs, activePairId, onFinishRect, onStartDrawing, onUpdateRect }) {
       const ref = React.useRef(null);
       const imgRef = React.useRef(null);
@@ -136,13 +122,11 @@
       const [ready, setReady] = React.useState(false);
       const editRef = React.useRef(null);
 
-      const DRAG_THRESH_PX = 6; // must move this much to create a rect
+      const DRAG_THRESH_PX = 6;
 
       const measureReady = React.useCallback(() => {
         const img = imgRef.current;
-        if (!img) return;
-        const ok = img.complete && (img.naturalWidth||0) > 1 && (img.naturalHeight||0) > 1;
-        setReady(ok);
+        setReady(!!img && img.complete && (img.naturalWidth||0) > 1 && (img.naturalHeight||0) > 1);
       }, []);
 
       React.useEffect(() => {
@@ -176,6 +160,7 @@
         if (!ready) return;
         if (e.target.closest('.anno-rect') || e.target.closest('.resize-handle')) return;
 
+        // ensure we have a pair id synchronously
         let pairId = activePairId;
         if (!pairId && typeof onStartDrawing === 'function') pairId = onStartDrawing() || null;
         if (!pairId) return;
@@ -196,10 +181,10 @@
         if (editRef.current) {
           const { fx, fy } = clientToFrac(e.clientX, e.clientY);
           const action = editRef.current;
-          const r0 = action.startRect; // already fractional
+          const r0 = action.startRect;
 
           let xf = r0.xf, yf = r0.yf, wf = r0.wf, hf = r0.hf;
-          const minF = 8 / Math.max(liveRect().w, liveRect().h); // ~8px in fraction
+          const minF = 8 / Math.max(liveRect().w, liveRect().h);
           if (action.mode === 'move') {
             const start = clientToFrac(action.startClientX, action.startClientY);
             xf = clamp(r0.xf + (fx - start.fx), 0, 1 - r0.wf);
@@ -227,10 +212,8 @@
               wf = newRight - r0.xf; hf = newBottom - r0.yf;
             }
           }
-          xf = clamp(xf, 0, 1 - 1e-6);
-          yf = clamp(yf, 0, 1 - 1e-6);
-          wf = clamp(wf, 1e-6, 1 - xf);
-          hf = clamp(hf, 1e-6, 1 - yf);
+          xf = clamp(xf, 0, 1 - 1e-6); yf = clamp(yf, 0, 1 - 1e-6);
+          wf = clamp(wf, 1e-6, 1 - xf); hf = clamp(hf, 1e-6, 1 - yf);
           onUpdateRect && onUpdateRect(action.pairId, action.rectIndex, { xf, yf, wf, hf, imageIndex });
         }
       };
@@ -251,7 +234,6 @@
             const hf = clamp(b.fy - a.fy, 1e-4, 1 - yf);
             onFinishRect && onFinishRect(pairId, { xf, yf, wf, hf, imageIndex });
           }
-          // If not moved enough, treat it like a simple click: do nothing.
           setDrag(null);
         }
         editRef.current = null;
@@ -288,14 +270,11 @@
       };
 
       const rectsForThisImage = (p) =>
-        (p.rects || [])
-          .map((r, absIndex) => ({ r, absIndex }))
-          .filter(({ r }) => r.imageIndex === imageIndex);
+        (p.rects || []).map((r, absIndex) => ({ r, absIndex })).filter(({ r }) => r.imageIndex === imageIndex);
 
-      // Only show a draft box if we've crossed the threshold
+      // Show draft only past threshold
       const draftBox = drag ? (() => {
-        const r = imgRef.current?.getBoundingClientRect();
-        if (!r) return null;
+        const r = imgRef.current?.getBoundingClientRect(); if (!r) return null;
         const w = Math.abs(drag.curX - drag.startX);
         const h = Math.abs(drag.curY - drag.startY);
         if (Math.max(w, h) < DRAG_THRESH_PX) return null;
@@ -468,34 +447,42 @@
       );
     }
 
-    // Practice panel (no persistence)
+    // ===== Practice (kept simple, but already worked fine) =====
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
 
       const newPair = () => {
-        const color = COLORS[pairs.length % COLORS.length];
-        const p = { pairId: uid(), color, label: "", visible: true, rects: [] };
-        setPairs((arr) => [...arr, p]);
-        setActivePairId(p.pairId);
-        return p.pairId;
+        const id = uid();
+        setPairs(prev => {
+          const color = COLORS[prev.length % COLORS.length];
+          return [...prev, { pairId:id, color, label:"", visible:true, rects:[] }];
+        });
+        setActivePairId(id);
+        return id;
       };
+
       const onStartDrawing = () => activePairId || newPair();
+
       const onFinishRect = (pairId, rect) => {
-        const target = pairs.find((p) => p.pairId === pairId);
-        const existing = target ? target.rects.length : 0;
-        const newLen = existing + 1;
-        setPairs((prev) => prev.map((p) => p.pairId === pairId ? { ...p, rects: [...p.rects, rect] } : p));
-        setActivePairId(newLen >= 2 ? null : pairId);
-      };
-      const onUpdateRect = (pairId, rectIndex, newRect) => {
-        setPairs((prev) => prev.map((p) => {
+        let nextActive = pairId;
+        setPairs(prev => prev.map(p => {
           if (p.pairId !== pairId) return p;
-          const next = [...p.rects];
-          next[rectIndex] = newRect;
-          return { ...p, rects: next };
+          const rects = [...p.rects, rect];
+          if (rects.length >= 2) nextActive = null;
+          return { ...p, rects };
+        }));
+        setActivePairId(nextActive);
+      };
+
+      const onUpdateRect = (pairId, rectIndex, newRect) => {
+        setPairs(prev => prev.map(p => {
+          if (p.pairId !== pairId) return p;
+          const rects = [...p.rects]; rects[rectIndex] = newRect;
+          return { ...p, rects };
         }));
       };
+
       const reset = () => { setPairs([]); setActivePairId(null); };
 
       const setDef = { images: [
@@ -618,7 +605,7 @@
       );
     }
 
-    // ======= Main App =======
+    // ===== Main App (functional-safe updates) =====
     function App() {
       const [study, setStudy] = useState(SAMPLE_STUDY);
       const [sceneIdx, setSceneIdx] = useState(0);
@@ -641,7 +628,6 @@
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
 
-      // optional external config
       useEffect(() => {
         const url = getConfigParam();
         if (!url) return;
@@ -674,106 +660,93 @@
 
       function loadInitialAnnos(studyObj) {
         const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed && typeof parsed === "object") return parsed;
-          } catch {}
-        }
+        if (saved) { try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === "object") return parsed; } catch {} }
         const blank = {};
         for (const sc of studyObj.scenes) {
           const setsMap = {};
-          for (const s of sc.sets) {
-            setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
-          }
+          for (const s of sc.sets) setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
           blank[sc.sceneId] = { sceneId: sc.sceneId, sets: setsMap };
         }
         return blank;
       }
 
-      function updateSetAnno(upd) {
-        setAnnos((prev) => {
-          const prevScene = prev[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} };
+      // ---- functional helper to mutate just the current set safely
+      function mutateCurrentSet(mutator) {
+        setAnnos(prev => {
+          const scId = currentScene.sceneId;
+          const setId = setDef.setId;
+          const scene = prev[scId] || { sceneId: scId, sets: {} };
+          const currSet = scene.sets[setId] || { setId, noInconsistencies: false, pairs: [] };
+          const nextSet = mutator({ ...currSet, pairs: [...(currSet.pairs || [])] });
           return {
             ...prev,
-            [currentScene.sceneId]: {
-              ...prevScene,
-              sets: {
-                ...prevScene.sets,
-                [setDef.setId]: upd,
-              },
-            },
+            [scId]: { ...scene, sets: { ...scene.sets, [setId]: nextSet } }
           };
         });
       }
 
+      // create a new pair and return its id immediately
       function newPairGetId(color) {
-        const colorToUse = color || COLORS[(setAnno.pairs || []).length % COLORS.length];
-        const p = { pairId: uid(), color: colorToUse, label: "", visible: true, rects: [] };
-        const nextPairs = (setAnno.pairs || []).concat([p]);
-        updateSetAnno({ ...setAnno, noInconsistencies: false, pairs: nextPairs });
-        setActivePairId(p.pairId);
-        return p.pairId;
+        const id = uid();
+        mutateCurrentSet(set => {
+          const c = color || COLORS[set.pairs.length % COLORS.length];
+          const p = { pairId: id, color: c, label: "", visible: true, rects: [] };
+          return { ...set, noInconsistencies: false, pairs: [...set.pairs, p] };
+        });
+        setActivePairId(id);
+        return id;
       }
       function newPair(color) { newPairGetId(color); }
 
       function deletePair(pairId) {
         if (!confirm("Delete this pair?")) return;
-        const next = (setAnno.pairs || []).filter((p) => p.pairId !== pairId);
-        updateSetAnno({ ...setAnno, pairs: next });
+        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.filter(p => p.pairId !== pairId) }));
         if (activePairId === pairId) setActivePairId(null);
       }
       function togglePair(pairId) {
-        const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, visible: !p.visible } : p));
-        updateSetAnno({ ...setAnno, pairs: next });
+        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,visible:!p.visible}:p) }));
       }
       function labelPair(pairId, label) {
-        const next = (setAnno.pairs || []).map((p) => (p.pairId === pairId ? { ...p, label } : p));
-        updateSetAnno({ ...setAnno, pairs: next });
+        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,label}:p) }));
       }
 
       function handleFinishRect(pairId, rect) {
-        const arr = (setAnno.pairs || []);
-        const idx = arr.findIndex((p) => p.pairId === pairId);
-        if (idx < 0) return;
-        const p = arr[idx];
-        if ((p.rects || []).length >= 2) return;
-        const updated = { ...p, rects: (p.rects || []).concat([rect]) };
-        const newArr = arr.slice();
-        newArr[idx] = updated;
-        updateSetAnno({ ...setAnno, pairs: newArr });
-        if (updated.rects.length >= 2) setActivePairId(null);
+        let newLen = 0;
+        mutateCurrentSet(set => {
+          const idx = set.pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set; // pair somehow missing
+          const p = set.pairs[idx];
+          if ((p.rects || []).length >= 2) return set;
+          const updated = { ...p, rects: [...(p.rects || []), rect] };
+          newLen = updated.rects.length;
+          const nextPairs = set.pairs.slice(); nextPairs[idx] = updated;
+          return { ...set, pairs: nextPairs, noInconsistencies: false };
+        });
+        if (newLen >= 2) setActivePairId(null);
       }
 
       function onUpdateRect(pairId, rectIndex, newRect) {
-        const arr = (setAnno.pairs || []);
-        const idx = arr.findIndex((p) => p.pairId === pairId);
-        if (idx < 0) return;
-        const p = arr[idx];
-        const rects = (p.rects || []).slice();
-        rects[rectIndex] = newRect;
-        const newArr = arr.slice();
-        newArr[idx] = { ...p, rects };
-        updateSetAnno({ ...setAnno, pairs: newArr });
+        mutateCurrentSet(set => {
+          const idx = set.pairs.findIndex(p => p.pairId === pairId);
+          if (idx < 0) return set;
+          const p = set.pairs[idx];
+          const rects = [...(p.rects || [])];
+          rects[rectIndex] = newRect;
+          const nextPairs = set.pairs.slice(); nextPairs[idx] = { ...p, rects };
+          return { ...set, pairs: nextPairs };
+        });
       }
 
       function onImport(json) {
         if (json && json.scenes && json.setNames) {
           setStudy(json);
           setAnnos(loadInitialAnnos(json));
-          setSceneIdx(0);
-          setSetTab(0);
-          setActivePairId(null);
+          setSceneIdx(0); setSetTab(0); setActivePairId(null);
           setUiOrder(buildOrLoadUiOrder(json));
         } else if (json && json.studyId && typeof json === "object") {
           if (json.annos) setAnnos(json.annos);
-          if (json.study) {
-            setStudy(json.study);
-            setUiOrder(buildOrLoadUiOrder(json.study));
-          }
-        } else {
-          alert("Unrecognized JSON format.");
-        }
+          if (json.study) { setStudy(json.study); setUiOrder(buildOrLoadUiOrder(json.study)); }
+        } else { alert("Unrecognized JSON format."); }
       }
 
       function onExport() {
@@ -785,8 +758,7 @@
         const sc = study.scenes[sceneIndex];
         const savedScene = annos[sc.sceneId];
         if (!savedScene || !savedScene.sets) return false;
-        const s0 = sc.sets[0];
-        const s1 = sc.sets[1];
+        const s0 = sc.sets[0], s1 = sc.sets[1];
         const a0 = savedScene.sets[s0.setId] || { noInconsistencies: false, pairs: [] };
         const a1 = savedScene.sets[s1.setId] || { noInconsistencies: false, pairs: [] };
         const ok = (a) => !!a && (a.noInconsistencies === true || (Array.isArray(a.pairs) && a.pairs.some((p) => Array.isArray(p.rects) && p.rects.length === 2)));
@@ -799,41 +771,25 @@
       }
 
       function gotoNextScene() {
-        if (sceneIdx < study.scenes.length - 1) {
-          setSceneIdx(sceneIdx + 1);
-          setSetTab(0);
-          setActivePairId(null);
-        } else {
-          alert("You've reached the last scene. If everything is complete, press Submit (top-right).");
-        }
+        if (sceneIdx < study.scenes.length - 1) { setSceneIdx(sceneIdx + 1); setSetTab(0); setActivePairId(null); }
+        else { alert("You've reached the last scene. If everything is complete, press Submit (top-right)."); }
       }
-      function gotoPrevScene() {
-        if (sceneIdx > 0) setSceneIdx(sceneIdx - 1), setSetTab(0), setActivePairId(null);
-      }
+      function gotoPrevScene() { if (sceneIdx > 0) { setSceneIdx(sceneIdx - 1); setSetTab(0); setActivePairId(null); } }
 
       async function submitToServer() {
         try {
           if (!raterId) { alert('Please enter your Rater ID.'); return; }
-          if (!ENDPOINT || ENDPOINT.includes('PASTE_')) {
-            alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
-            return;
-          }
+          if (!ENDPOINT || ENDPOINT.includes('PASTE_')) { alert('Please set the Google Apps Script ENDPOINT at the top of the file.'); return; }
           const fd = new FormData();
           fd.append('raterId', raterId);
           fd.append('studyId', study.studyId);
           fd.append('payload', JSON.stringify({
-            study,
-            annos,
-            exportedAt: new Date().toISOString(),
-            uiOrderByScene: uiOrder,
-            hiddenSetLabels: HIDDEN_SET_LABELS
+            study, annos, exportedAt: new Date().toISOString(),
+            uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
           setPhase('thanks');
-        } catch (err) {
-          console.error('Submission failed:', err);
-          alert('Submission failed. See console.');
-        }
+        } catch (err) { console.error('Submission failed:', err); alert('Submission failed. See console.'); }
       }
 
       function clearAllData() {
@@ -846,19 +802,13 @@
         } catch {}
         setRaterId(randomRaterId());
         setAnnos(loadInitialAnnos(study));
-        setSceneIdx(0);
-        setSetTab(0);
-        setActivePairId(null);
-        setPhase('intro');
-        setUiOrder(buildOrLoadUiOrder(study));
-        setShowInstr(false);
+        setSceneIdx(0); setSetTab(0); setActivePairId(null);
+        setPhase('intro'); setUiOrder(buildOrLoadUiOrder(study)); setShowInstr(false);
         alert('Cleared. You can start fresh.');
       }
 
-      const progressText = phase === 'rate'
-        ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
-        : (phase === 'thanks' ? `Submitted` : `Instructions`);
-
+      const progressText = phase === 'rate' ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
+                                            : (phase === 'thanks' ? `Submitted` : `Instructions`);
       const canSubmit = allScenesComplete();
       const onStartDrawing = () => activePairId || newPairGetId();
 
@@ -939,7 +889,7 @@
                   </div>
                   <Sidebar
                     setAnno={setAnno}
-                    onChange={(upd) => updateSetAnno(upd)}
+                    onChange={(upd) => mutateCurrentSet(() => upd)}  <!-- keep UI wiring -->
                     onNewPair={(color) => newPair(color)}
                     onDeletePair={deletePair}
                     onTogglePair={togglePair}
