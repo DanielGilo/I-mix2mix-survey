@@ -5,50 +5,572 @@
     {
       "taskId": "scene_001__dge_s1",
       "sceneId": "scene_001",
-      "sceneTitle": "TolkienElf",
       "algo": "DGE",
+      "sceneTitle": "Batman",
+      "setId": "dge_s1",
       "images": [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_0.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_1.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_2.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_3.png"
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/DGE/edit_3.png"
       ]
     },
     {
       "taskId": "scene_001__im2m_s1",
       "sceneId": "scene_001",
-      "sceneTitle": "TolkienElf",
       "algo": "I-M2M",
+      "sceneTitle": "Batman",
+      "setId": "im2m_s1",
       "images": [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_0_2329_06c060463e6ac13f4bee.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_1_2330_42ddc8281c3eecad5cab.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_2_2331_84316e229c5fe37c03c0.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_3_2332_6f861e1233eff45a811d.png"
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Batman/I-M2M/edit_3.png"
       ]
     },
     {
-      "taskId": "scene_02__dge_s2",
-      "sceneId": "scene_02",
-      "sceneTitle": "VanGogh",
+      "taskId": "scene_002__dge_s2",
+      "sceneId": "scene_002",
       "algo": "DGE",
+      "sceneTitle": "FacePaint",
+      "setId": "dge_s2",
       "images": [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_0.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_1.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_2.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_3.png"
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/DGE/edit_3.png"
       ]
     },
     {
-      "taskId": "scene_02__im2m_s2",
-      "sceneId": "scene_02",
-      "sceneTitle": "VanGogh",
+      "taskId": "scene_002__im2m_s2",
+      "sceneId": "scene_002",
       "algo": "I-M2M",
+      "sceneTitle": "FacePaint",
+      "setId": "im2m_s2",
       "images": [
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_0_2329_2ed057ea89f2bd12f570.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_1_2330_2202bc7831e9007171f5.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_2_2331_8808d07451dcc50c46ca.png",
-        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_3_2332_a4872a63df73e4285de2.png"
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/FacePaint/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_003__dge_s3",
+      "sceneId": "scene_003",
+      "algo": "DGE",
+      "sceneTitle": "ManInSuit",
+      "setId": "dge_s3",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_003__im2m_s3",
+      "sceneId": "scene_003",
+      "algo": "I-M2M",
+      "sceneTitle": "ManInSuit",
+      "setId": "im2m_s3",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/ManInSuit/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_004__dge_s4",
+      "sceneId": "scene_004",
+      "algo": "DGE",
+      "sceneTitle": "Robot",
+      "setId": "dge_s4",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_004__im2m_s4",
+      "sceneId": "scene_004",
+      "algo": "I-M2M",
+      "sceneTitle": "Robot",
+      "setId": "im2m_s4",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Robot/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_005__dge_s5",
+      "sceneId": "scene_005",
+      "algo": "DGE",
+      "sceneTitle": "Vampire",
+      "setId": "dge_s5",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_005__im2m_s5",
+      "sceneId": "scene_005",
+      "algo": "I-M2M",
+      "sceneTitle": "Vampire",
+      "setId": "im2m_s5",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Vampire/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_006__dge_s6",
+      "sceneId": "scene_006",
+      "algo": "DGE",
+      "sceneTitle": "Clown",
+      "setId": "dge_s6",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_006__im2m_s6",
+      "sceneId": "scene_006",
+      "algo": "I-M2M",
+      "sceneTitle": "Clown",
+      "setId": "im2m_s6",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Clown/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_007__dge_s7",
+      "sceneId": "scene_007",
+      "algo": "DGE",
+      "sceneTitle": "GrizzlyBear",
+      "setId": "dge_s7",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_007__im2m_s7",
+      "sceneId": "scene_007",
+      "algo": "I-M2M",
+      "sceneTitle": "GrizzlyBear",
+      "setId": "im2m_s7",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/GrizzlyBear/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_008__dge_s8",
+      "sceneId": "scene_008",
+      "algo": "DGE",
+      "sceneTitle": "MarbleStatue",
+      "setId": "dge_s8",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_008__im2m_s8",
+      "sceneId": "scene_008",
+      "algo": "I-M2M",
+      "sceneTitle": "MarbleStatue",
+      "setId": "im2m_s8",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/MarbleStatue/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_009__dge_s9",
+      "sceneId": "scene_009",
+      "algo": "DGE",
+      "sceneTitle": "Skull",
+      "setId": "dge_s9",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_009__im2m_s9",
+      "sceneId": "scene_009",
+      "algo": "I-M2M",
+      "sceneTitle": "Skull",
+      "setId": "im2m_s9",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Skull/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_010__dge_s10",
+      "sceneId": "scene_010",
+      "algo": "DGE",
+      "sceneTitle": "VanGogh",
+      "setId": "dge_s10",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_010__im2m_s10",
+      "sceneId": "scene_010",
+      "algo": "I-M2M",
+      "sceneTitle": "VanGogh",
+      "setId": "im2m_s10",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VanGogh/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_011__dge_s11",
+      "sceneId": "scene_011",
+      "algo": "DGE",
+      "sceneTitle": "Cowboy",
+      "setId": "dge_s11",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_011__im2m_s11",
+      "sceneId": "scene_011",
+      "algo": "I-M2M",
+      "sceneTitle": "Cowboy",
+      "setId": "im2m_s11",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Cowboy/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_012__dge_s12",
+      "sceneId": "scene_012",
+      "algo": "DGE",
+      "sceneTitle": "IronMan",
+      "setId": "dge_s12",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_012__im2m_s12",
+      "sceneId": "scene_012",
+      "algo": "I-M2M",
+      "sceneTitle": "IronMan",
+      "setId": "im2m_s12",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/IronMan/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_013__dge_s13",
+      "sceneId": "scene_013",
+      "algo": "DGE",
+      "sceneTitle": "PandaBear",
+      "setId": "dge_s13",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_013__im2m_s13",
+      "sceneId": "scene_013",
+      "algo": "I-M2M",
+      "sceneTitle": "PandaBear",
+      "setId": "im2m_s13",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PandaBear/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_014__dge_s14",
+      "sceneId": "scene_014",
+      "algo": "DGE",
+      "sceneTitle": "Soldier",
+      "setId": "dge_s14",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_014__im2m_s14",
+      "sceneId": "scene_014",
+      "algo": "I-M2M",
+      "sceneTitle": "Soldier",
+      "setId": "im2m_s14",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Soldier/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_015__dge_s15",
+      "sceneId": "scene_015",
+      "algo": "DGE",
+      "sceneTitle": "VenetianMask",
+      "setId": "dge_s15",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_015__im2m_s15",
+      "sceneId": "scene_015",
+      "algo": "I-M2M",
+      "sceneTitle": "VenetianMask",
+      "setId": "im2m_s15",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/VenetianMask/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_016__dge_s16",
+      "sceneId": "scene_016",
+      "algo": "DGE",
+      "sceneTitle": "Einstein",
+      "setId": "dge_s16",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_016__im2m_s16",
+      "sceneId": "scene_016",
+      "algo": "I-M2M",
+      "sceneTitle": "Einstein",
+      "setId": "im2m_s16",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Einstein/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_017__dge_s17",
+      "sceneId": "scene_017",
+      "algo": "DGE",
+      "sceneTitle": "Knight",
+      "setId": "dge_s17",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_017__im2m_s17",
+      "sceneId": "scene_017",
+      "algo": "I-M2M",
+      "sceneTitle": "Knight",
+      "setId": "im2m_s17",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/Knight/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_018__dge_s18",
+      "sceneId": "scene_018",
+      "algo": "DGE",
+      "sceneTitle": "PolarBear",
+      "setId": "dge_s18",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_018__im2m_s18",
+      "sceneId": "scene_018",
+      "algo": "I-M2M",
+      "sceneTitle": "PolarBear",
+      "setId": "im2m_s18",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/PolarBear/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_019__dge_s19",
+      "sceneId": "scene_019",
+      "algo": "DGE",
+      "sceneTitle": "TolkienElf",
+      "setId": "dge_s19",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_019__im2m_s19",
+      "sceneId": "scene_019",
+      "algo": "I-M2M",
+      "sceneTitle": "TolkienElf",
+      "setId": "im2m_s19",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/TolkienElf/I-M2M/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_020__dge_s20",
+      "sceneId": "scene_020",
+      "algo": "DGE",
+      "sceneTitle": "WoodenBear",
+      "setId": "dge_s20",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/DGE/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/DGE/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/DGE/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/DGE/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_020__im2m_s20",
+      "sceneId": "scene_020",
+      "algo": "I-M2M",
+      "sceneTitle": "WoodenBear",
+      "setId": "im2m_s20",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/I-M2M/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/I-M2M/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/I-M2M/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/WoodenBear/I-M2M/edit_3.png"
       ]
     }
+  ],
+  "assignedTaskBuckets": {
+  "A": [
+    "scene_001__dge_s1",
+    "scene_002__dge_s2",
+    "scene_003__dge_s3",
+    "scene_004__dge_s4",
+    "scene_005__dge_s5",
+    "scene_006__im2m_s6",
+    "scene_007__im2m_s7",
+    "scene_008__im2m_s8",
+    "scene_009__im2m_s9",
+    "scene_010__im2m_s10"
+  ],
+  "B": [
+    "scene_001__im2m_s1",
+    "scene_002__im2m_s2",
+    "scene_003__im2m_s3",
+    "scene_004__im2m_s4",
+    "scene_005__im2m_s5",
+    "scene_006__dge_s6",
+    "scene_007__dge_s7",
+    "scene_008__dge_s8",
+    "scene_009__dge_s9",
+    "scene_010__dge_s10"
+  ],
+  "C": [
+    "scene_011__dge_s11",
+    "scene_012__dge_s12",
+    "scene_013__dge_s13",
+    "scene_014__dge_s14",
+    "scene_015__dge_s15",
+    "scene_016__im2m_s16",
+    "scene_017__im2m_s17",
+    "scene_018__im2m_s18",
+    "scene_019__im2m_s19",
+    "scene_020__im2m_s20"
+  ],
+  "D": [
+    "scene_011__im2m_s11",
+    "scene_012__im2m_s12",
+    "scene_013__im2m_s13",
+    "scene_014__im2m_s14",
+    "scene_015__im2m_s15",
+    "scene_016__dge_s16",
+    "scene_017__dge_s17",
+    "scene_018__dge_s18",
+    "scene_019__dge_s19",
+    "scene_020__dge_s20"
   ]
+}
 }
