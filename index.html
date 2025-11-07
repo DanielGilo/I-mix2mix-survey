@@ -479,22 +479,39 @@
       );
     }
 
+     // ======= Instructions Panel (updated text) =======
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            In each set, you will see <b>four views of the same scene</b>. Your job is to mark places where the 3D interpretation is inconsistent <i>across the views</i>.
+            You will a set of <b>four images</b> per scene. Each set shows <b>the same moment in time</b>
+            captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
+            <b> inconsistencies between images within the same set</b>, if such exist.
           </p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li><b>Mark when 3D facts disagree:</b> shape/geometry, pose, identity, texture/material, or lighting being inconsistent between views.</li>
-            <li><b>Ignore:</b> background details, minor cropping, tiny color shifts, field-of-view changes, or harmless perspective differences.</li>
-            <li><b>How to mark:</b> press <b>New pair</b>, then draw <b>one rectangle in two different views</b> that refer to the <b>same 3D spot</b> (max 2 rectangles per pair).</li>
-            <li>You can move/resize rectangles; hide/show or delete a pair; add multiple pairs as needed.</li>
-            <li>If you find <b>no inconsistencies</b>, click <b>“Mark no inconsistencies”</b> for this set instead of creating pairs.</li>
+
+          <ul className="list-disc ml-5 space-y-1">
+            <li><b>Ignore preference and image quality.</b> Do <b>not</b> consider if the images look nice or sharp.</li>
+            <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.</li>
+            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; a wrist watch exists in one image, but is absent on another; bueye color differs; logos/prints/texture change across views.</li>
+            <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
+            <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
+            <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
+            <li><b>It is also possible that the set is consistent.</b> Please invest <b>at least 60 seconds per set</b> to look for inconsistencies. If none are found, mark <b>“No inconsistencies”</b> for that set.</li>
           </ul>
+
+          <p>
+            An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing —
+            covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view over
+            the inconsistent region, then draw the matching rectangle on the corresponding view. Add as many pairs as
+            needed.
+          </p>
+
           {INTRO_VIDEO_URL && (
             <div className="mt-2">
               <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
+              <div className="text-xs text-neutral-500 mt-1">
+                The video shows an example of how to mark inconsistencies between two views.
+              </div>
             </div>
           )}
         </div>
