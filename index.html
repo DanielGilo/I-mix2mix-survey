@@ -484,7 +484,7 @@
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            You will a set of <b>four images</b> per scene. Each set shows <b>the same moment in time</b>
+            You will be presented with images from 10 scenes. For each scene, you will a set of <b>four images</b>. Each set shows <b>the same moment in time </b>
             captured from <b>different viewing angles</b> (multi-view). Your task is to find and mark
             <b> inconsistencies between images within the same set</b>, if such exist.
           </p>
@@ -492,7 +492,7 @@
           <ul className="list-disc ml-5 space-y-1">
             <li><b>Ignore preference and image quality.</b> Do <b>not</b> consider if the images look nice or sharp.</li>
             <li>Focus only on <b>3D consistency</b>: shape, pose, identity, material/texture, and lighting consistency.</li>
-            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; a wrist watch exists in one image, but is absent on another; bueye color differs; logos/prints/texture change across views.</li>
+            <li>Examples of inconsistencies: the nose looks pointy in one view but rounded in another; a wrist watch exists in one image, but is absent on another; eye color differs; logos/prints/texture change across views.</li>
             <li>Please <b>mark all inconsistencies you can find</b> in each set.</li>
             <li>Some sets may seem consistent at first glance but contain subtle issues on closer inspection.</li>
             <li>Inconsistencies can be obvious (e.g., missing objects) or subtle (e.g., slight shape or texture changes). <b>Subtle issues matter</b> (e.g., <i>fabric texture</i> alignment) — please mark them too.</li>
@@ -503,14 +503,17 @@
             An inconsistency is marked by a <b>pair of rectangles</b> — one on each of the two images you are comparing —
             covering the regions that disagree. To annotate, click <b>New pair (N)</b>, draw a rectangle on one view over
             the inconsistent region, then draw the matching rectangle on the corresponding view. Add as many pairs as
-            needed.
+            needed. 
+            Below is a video demonstrating how to mark inconsistencies - the color and texture of the belts do not match;
+            the wrist watches are different; the face looks like it belongs to different people; and the shirt pocket look different
+             There exist more inconsistencies in this image set - when marking, please try to find all inconsistencies you can.
           </p>
 
           {INTRO_VIDEO_URL && (
             <div className="mt-2">
               <video src={INTRO_VIDEO_URL} controls playsinline className="w-full rounded-xl border" />
               <div className="text-xs text-neutral-500 mt-1">
-                The video shows an example of how to mark inconsistencies between two views.
+                The video shows an example of how to mark inconsistencies between views.
               </div>
             </div>
           )}
