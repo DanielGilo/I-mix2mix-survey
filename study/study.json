@@ -1,6 +1,6 @@
 {
   "studyId": "mv3d_v1",
-  "minSecondsPerSet": 8,
+  "minSecondsPerSet": 60,
   "tasks": [
     {
       "taskId": "scene_001__dge_s1",
