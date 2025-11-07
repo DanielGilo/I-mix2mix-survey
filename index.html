@@ -4,12 +4,9 @@
     <meta charset="utf-8" />
     <title>3D Consistency Rater</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React 18 UMD -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
       html, body, #root { height: 100%; }
@@ -30,75 +27,47 @@
     <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useState, useRef, useCallback } = React;
 
-    // ======= CONFIG =======
     const INTRO_VIDEO_URL = "https://danielgilo.github.io/I-mix2mix-survey/example_marking.mp4";
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbz9tzOqJ3Ay10M5scvw-TiYFGXlaFftINiuZJsC5HBMn4IvpoQLryHhhx4OM_zSrJ-q/exec";
     const PROLIFIC_COMPLETION_URL = "https://app.prolific.com/submissions/complete?cc=CF8X52JX";
 
-    // >>> TIMER: minimum seconds required per set <<<
-    const MIN_VIEW_SECS = 30;
-
-    // ======= SAMPLE DATA (fallback only) =======
-    const SAMPLE_STUDY = {
-      studyId: "demo_study_v1",
-      instructions: "Mark paired rectangles where multi-view images disagree in 3D.",
-      setNames: ["DGE", "I-M2M"],
-      scenes: [
-        {
-          sceneId: "scene_001",
-          title: "Sample Scene",
-          sets: [
-            { setId: "a1", images: [
-              "https://picsum.photos/seed/a1/640/400",
-              "https://picsum.photos/seed/a2/640/400",
-              "https://picsum.photos/seed/a3/640/400",
-              "https://picsum.photos/seed/a4/640/400",
-            ]},
-            { setId: "b1", images: [
-              "https://picsum.photos/seed/b1/640/400",
-              "https://picsum.photos/seed/b2/640/400",
-              "https://picsum.photos/seed/b3/640/400",
-              "https://picsum.photos/seed/b4/640/400",
-            ]},
-          ],
-        }
-      ],
-    };
-
-    // ======= Helpers =======
     const COLORS = ["#ff3b30","#ff9500","#ffcc00","#34c759","#00c7be","#32ade6","#5856d6","#af52de","#ff2d55","#8e8e93"];
     const uid = () => Math.random().toString(36).slice(2, 9);
     const pretty = (obj) => JSON.stringify(obj, null, 2);
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const LS_KEY = (studyId) => `mv3d_rater__${studyId}`;
-    const ORDER_KEY = (studyId) => `mv3d_uiorder__${studyId}`;
-    const HIDDEN_SET_LABELS = ["Set A", "Set B"];
+    const ASSIGN_KEY = (studyId, pid) => `mv3d_assign__${studyId}__${pid}`;
 
-    function buildOrLoadUiOrder(study) {
-      try {
-        const existing = localStorage.getItem(ORDER_KEY(study.studyId));
-        if (existing) return JSON.parse(existing);
-      } catch {}
-      const map = {};
-      for (const sc of study.scenes) {
-        map[sc.sceneId] = Math.random() < 0.5 ? [0, 1] : [1, 0];
-      }
-      try { localStorage.setItem(ORDER_KEY(study.studyId), JSON.stringify(map)); } catch {}
-      return map;
-    }
+    const SAMPLE_STUDY = {
+      studyId: "demo_study_v2",
+      minSecondsPerSet: 30,
+      tasks: [
+        { taskId: "sample_01_A", sceneId: "sample_01", sceneTitle: "Sample Statue", algo: "A",
+          images: [
+            "https://picsum.photos/seed/a1/640/400",
+            "https://picsum.photos/seed/a2/640/400",
+            "https://picsum.photos/seed/a3/640/400",
+            "https://picsum.photos/seed/a4/640/400",
+          ]},
+        { taskId: "sample_02_B", sceneId: "sample_02", sceneTitle: "Sample Hall", algo: "B",
+          images: [
+            "https://picsum.photos/seed/b1/640/400",
+            "https://picsum.photos/seed/b2/640/400",
+            "https://picsum.photos/seed/b3/640/400",
+            "https://picsum.photos/seed/b4/640/400",
+          ]},
+      ],
+    };
 
-    // Read Prolific params
-    function getProlificParam(name) {
+    function getQueryParam(name) {
       try {
         const sp = new URLSearchParams(window.location.search);
-        return sp.get(name) || sp.get(name.toLowerCase()) || null;
+        return sp.get(name) || sp.get(name.toUpperCase()) || sp.get(name.toLowerCase()) || null;
       } catch { return null; }
     }
     function getProlificIdFromQuery() {
-      // Prolific sends PROLIFIC_PID (and STUDY_ID, SESSION_ID)
-      return getProlificParam("PROLIFIC_PID");
+      return getQueryParam("PROLIFIC_PID");
     }
-
     function getConfigParam() {
       try {
         const sp = new URLSearchParams(window.location.search);
@@ -106,7 +75,6 @@
         return u && u.trim() ? u.trim() : null;
       } catch { return null; }
     }
-
     function download(filename, text) {
       const el = document.createElement("a");
       el.setAttribute("href","data:text/json;charset=utf-8," + encodeURIComponent(text));
@@ -117,15 +85,74 @@
       el.remove();
     }
 
-    // ======= ImageBox: draw only if there's an active, not-full pair =======
+    function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19;} return function(){ h=Math.imul(h^(h>>>16),2246822507); h=Math.imul(h^(h>>>13),3266489909); return (h^(h>>>16))>>>0; } }
+    function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),1|t); t^=t+Math.imul(t^(t>>>7),61|t); return ((t^(t>>>14))>>>0)/4294967296; } }
+    function seededShuffle(arr, seedStr){
+      const seed = xmur3(seedStr||"seed")();
+      const rnd = mulberry32(seed);
+      const a = arr.slice();
+      for (let i=a.length-1;i>0;i--){
+        const j = Math.floor(rnd()*(i+1));
+        [a[i],a[j]] = [a[j],a[i]];
+      }
+      return a;
+    }
+
+    function convertOldStudyToTasks(json) {
+      if (!json || !Array.isArray(json.scenes)) return null;
+      const names = Array.isArray(json.setNames) ? json.setNames : [];
+      const tasks = [];
+      for (const sc of json.scenes) {
+        for (let i=0;i<(sc.sets||[]).length;i++){
+          const s = sc.sets[i];
+          tasks.push({
+            taskId: `${sc.sceneId}__${s.setId}`,
+            sceneId: sc.sceneId,
+            sceneTitle: sc.title || sc.sceneId,
+            images: s.images,
+            algo: names[i] || `algo${i+1}`
+          });
+        }
+      }
+      return {
+        studyId: json.studyId || "converted_study",
+        minSecondsPerSet: json.minSecondsPerSet || 30,
+        tasks
+      };
+    }
+
+    function assignTasksForRater(study, prolificId, count=10){
+      const byScene = new Map();
+      for (const t of study.tasks) {
+        const arr = byScene.get(t.sceneId) || [];
+        arr.push(t);
+        byScene.set(t.sceneId, arr);
+      }
+      const scenes = seededShuffle([...byScene.keys()], prolificId || "seed");
+      const chosen = [];
+      for (const scId of scenes) {
+        const variants = seededShuffle(byScene.get(scId), (prolificId || "seed") + ":" + scId);
+        chosen.push(variants[0]);
+        if (chosen.length >= count) break;
+      }
+      if (chosen.length < count) {
+        for (const scId of scenes) {
+          if (chosen.length >= count) break;
+          const variants = seededShuffle(byScene.get(scId), (prolificId || "seed") + ":fill:" + scId);
+          if (!chosen.some(x => x.sceneId === scId)) chosen.push(variants[0]);
+        }
+      }
+      return chosen.map(t => t.taskId);
+    }
+
     function ImageBox({ src, imageIndex, pairs, activePairId, verifyPairReady, commitRect, updateRect }) {
       const rootRef = useRef(null);
       const imgRef = useRef(null);
 
       const [ready, setReady] = useState(false);
-      const [draft, setDraft] = useState(null); // {x,y,w,h,color}
+      const [draft, setDraft] = useState(null);
 
-      const dragRef = useRef(null); // {startX,startY,curX,curY, pairId}
+      const dragRef = useRef(null);
       const DRAG_THRESH_PX = 4;
 
       const measureReady = useCallback(() => {
@@ -228,7 +255,6 @@
         setDraft(null);
       };
 
-      // Move/resize existing rectangles
       const editRef = useRef(null);
       const startMoveRect = (e, pairId, rectIndex, rect) => {
         e.stopPropagation(); e.preventDefault();
@@ -338,7 +364,7 @@
     function SetViewer({ setDef, anno, activePairId, verifyPairReady, commitRect, updateRect }) {
       return (
         <div className="grid grid-cols-2 gap-3 w-full auto-rows-auto">
-          {setDef.images.map((src, idx) => (
+          {(setDef.images || []).map((src, idx) => (
             <div key={idx}>
               <ImageBox
                 src={src}
@@ -356,23 +382,20 @@
     }
 
     function Sidebar({
-      setAnno, onChange, onNewPair, onDeletePair, onTogglePair, onLabelPair,
-      activePairId, setActivePairId, canFinishScene, onNextScene, onPrevScene,
-      // >>> TIMER: pass time gate info here <<<
-      timeGate
+      anno, onChange, onNewPair, onDeletePair, onTogglePair, onLabelPair,
+      activePairId, setActivePairId, canNext, onNext, onPrev, showTimerText
     }) {
-      const pairs = setAnno.pairs || [];
-
+      const pairs = anno.pairs || [];
       return (
         <div className="w-full lg:w-80 shrink-0 flex flex-col gap-3">
           <div className="p-3 rounded-xl border bg-white shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Current set</div>
               <button
-                className={`text-xs px-2 py-1 rounded-md border ${setAnno.noInconsistencies ? "bg-green-50 border-green-300" : ""}`}
-                onClick={() => onChange({ ...setAnno, noInconsistencies: !setAnno.noInconsistencies })}
+                className={`text-xs px-2 py-1 rounded-md border ${anno.noInconsistencies ? "bg-green-50 border-green-300" : ""}`}
+                onClick={() => onChange({ ...anno, noInconsistencies: !anno.noInconsistencies })}
               >
-                {setAnno.noInconsistencies ? "No inconsistencies ✓" : "Mark no inconsistencies"}
+                {anno.noInconsistencies ? "No inconsistencies ✓" : "Mark no inconsistencies"}
               </button>
             </div>
             <div className="text-xs text-neutral-500 mt-1">Either add ≥1 pair OR mark “No inconsistencies”.</div>
@@ -385,7 +408,7 @@
                 New pair (N)
               </button>
             </div>
-            <div className="text-xs text-neutral-500 mt-1">Start a pair, then draw rectangles on two views.</div>
+            <div className="text-xs text-neutral-500 mt-1">Start a pair, then draw rectangles on two views (max 2 per pair).</div>
 
             <div className="mt-3 flex flex-col gap-2 max-h-64 overflow-auto pr-1">
               {pairs.length === 0 && <div className="text-sm text-neutral-400">No pairs yet.</div>}
@@ -426,49 +449,31 @@
 
           <div className="p-3 rounded-xl border bg-white shadow-sm">
             <div className="font-semibold mb-2">Viewing requirement</div>
-            <div className="text-xs text-neutral-600 mb-2">
-              View each set for at least <b>{MIN_VIEW_SECS}s</b>.
-            </div>
-            <div className="flex flex-col gap-1">
-              {timeGate.perSetStatus.map((s, i) => (
-                <div key={i} className="text-sm flex items-center justify-between">
-                  <div>{s.label}</div>
-                  <div className={`px-2 py-0.5 rounded ${s.done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                    {s.done ? "Done" : `${s.remain}s left`}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 rounded-xl border bg-white shadow-sm flex flex-col gap-2">
-            <div className="text-xs text-neutral-500">
-              Shortcuts: <kbd>N</kbd> new pair (not when typing), <kbd>Backspace</kbd> delete active pair (not when typing).
-            </div>
+            <div className="text-xs text-neutral-600 mb-2">{showTimerText}</div>
             <div className="flex gap-2">
-              <button className="px-3 py-2 rounded-lg border" onClick={onPrevScene}>◀ Prev scene</button>
+              <button className="px-3 py-2 rounded-lg border" onClick={onPrev}>◀ Prev set</button>
               <button
-                className={`px-3 py-2 rounded-lg border ${(canFinishScene && timeGate.allDone) ? "bg-black text-white" : "opacity-50"}`}
-                disabled={!(canFinishScene && timeGate.allDone)}
-                onClick={() => onNextScene()}
-                title={timeGate.allDone ? (canFinishScene ? "Go to next scene" : "Complete annotations to continue") : "Keep viewing until timers finish"}
+                className={`px-3 py-2 rounded-lg border ${canNext ? "bg-black text-white" : "opacity-50"}`}
+                disabled={!canNext}
+                onClick={onNext}
               >
-                Next scene ▶
+                Next set ▶
               </button>
+            </div>
+            <div className="text-[11px] text-neutral-500 mt-2">
+              Shortcuts: N = new pair (not when typing), Backspace = delete active pair (not when typing).
             </div>
           </div>
         </div>
       );
     }
 
-    // ---------- Instructions + Practice ----------
     function InstructionsPanel() {
       return (
         <div className="mb-3 p-3 rounded-xl border bg-white shadow-sm text-sm text-neutral-800 space-y-2">
           <p>
-            You will see <b>two sets of four images</b> per scene. Each set shows the same moment
-            from different viewing angles. Focus on <b>3D consistency</b> only (shape, pose, identity,
-            texture/material, lighting). Mark all inconsistencies you can find.
+            You will see a set of four images from the same scene and viewpoint family. Focus on <b>3D consistency</b> only
+            (shape, pose, identity, texture/material, lighting). Mark all inconsistencies you can find.
           </p>
           {INTRO_VIDEO_URL && (
             <div className="mt-2">
@@ -479,7 +484,6 @@
       );
     }
 
-    // Practice panel (unchanged drawing behavior)
     function PracticePanel() {
       const [pairs, setPairs] = useState([]);
       const [activePairId, setActivePairId] = useState(null);
@@ -552,13 +556,13 @@
             updateRect={updateRect}
           />
           <div className="text-xs text-neutral-600 mt-2">
-            Tip: select a pair, then <b>click-drag</b> to draw rectangles (max two per pair). Click inside to move; use corners to resize.
+            Tip: select a pair, then click-drag to draw rectangles (max two per pair). Click inside to move; use corners to resize.
           </div>
         </div>
       );
     }
 
-    function IntroScreen({ study, prolificId, setProlificId, onStart, onClearAll, locked }) {
+    function IntroScreen({ prolificId, setProlificId, locked, onStart, onClearAll }) {
       return (
         <div className="max-w-4xl mx-auto mt-8 p-5 rounded-2xl border bg-white shadow-sm">
           <h1 className="text-2xl font-semibold mb-3">Welcome to the 3D Consistency Study</h1>
@@ -586,17 +590,10 @@
       );
     }
 
-    // ======= Main App =======
     function App() {
       const [study, setStudy] = useState(SAMPLE_STUDY);
-      const [sceneIdx, setSceneIdx] = useState(0);
-      const [setTab, setSetTab] = useState(0);
-      const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
-      const [activePairId, setActivePairId] = useState(null);
-
       const [phase, setPhase] = useState(() => localStorage.getItem('mv3d_phase') || 'intro');
 
-      // Prolific ID handling
       const prolificFromQuery = getProlificIdFromQuery();
       const [raterId, setRaterId] = useState(() => {
         const saved = localStorage.getItem('mv3d_rater_id');
@@ -605,25 +602,26 @@
       });
       const prolificLocked = !!prolificFromQuery;
 
-      const [uiOrder, setUiOrder] = useState(() => buildOrLoadUiOrder(SAMPLE_STUDY));
+      const [annos, setAnnos] = useState(() => loadInitialAnnos(SAMPLE_STUDY));
+      const [assignedTaskIds, setAssignedTaskIds] = useState([]);
+      const [taskIndex, setTaskIndex] = useState(0);
+      const [activePairId, setActivePairId] = useState(null);
 
       const [loadingConfig, setLoadingConfig] = useState(false);
       const [configError, setConfigError] = useState(null);
       const [configSource, setConfigSource] = useState(null);
 
-      // >>> TIMER: per-scene per-set view map { [sceneId]: { [setId]: { firstShown, elapsed } } }
-      const [viewMap, setViewMap] = useState({});
-
-      useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
       useEffect(() => { localStorage.setItem('mv3d_rater_id', raterId || ""); }, [raterId]);
       useEffect(() => { localStorage.setItem('mv3d_phase', phase); }, [phase]);
+      useEffect(() => { localStorage.setItem(LS_KEY(study.studyId), pretty(annos)); }, [annos, study.studyId]);
 
-      // Load external study: ?config=<url> or fallback to ./study.json
       useEffect(() => {
         let cancelled = false;
         const tryLoad = async () => {
           const urlParam = getConfigParam();
           const candidates = urlParam ? [urlParam] : ['study.json'];
+          let loaded = null, loadedUrl = null, err = null;
+
           for (const url of candidates) {
             try {
               setLoadingConfig(true); setConfigError(null);
@@ -631,20 +629,31 @@
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const json = await res.json();
               if (cancelled) return;
-              if (json && json.scenes && json.setNames) {
-                setStudy(json);
-                setAnnos(loadInitialAnnos(json));
-                setSceneIdx(0); setSetTab(0); setActivePairId(null);
-                setUiOrder(buildOrLoadUiOrder(json));
-                setConfigSource(url);
-                setViewMap({}); // reset timers when loading a new study
+              if (json && Array.isArray(json.tasks)) {
+                loaded = json;
+                loadedUrl = url;
                 break;
+              } else if (json && Array.isArray(json.scenes)) {
+                const converted = convertOldStudyToTasks(json);
+                if (converted) { loaded = converted; loadedUrl = url; break; }
               }
             } catch (e) {
-              if (!urlParam) { /* ignore error, keep SAMPLE_STUDY */ }
-              else setConfigError(String(e));
+              err = String(e);
+              if (urlParam) break;
             } finally {
               setLoadingConfig(false);
+            }
+          }
+
+          if (!cancelled) {
+            if (loaded) {
+              setStudy(loaded);
+              setAnnos(loadInitialAnnos(loaded));
+              setTaskIndex(0);
+              setActivePairId(null);
+              setConfigSource(loadedUrl);
+            } else if (err) {
+              setConfigError(err);
             }
           }
         };
@@ -652,64 +661,63 @@
         return () => { cancelled = true; };
       }, []);
 
-      // derive current
-      const currentScene = study.scenes[sceneIdx];
-      const order = (uiOrder[currentScene.sceneId] || [0, 1]);
-      const setDef = currentScene.sets[order[setTab]];
-      const sceneAnno = (annos[currentScene.sceneId] || { sceneId: currentScene.sceneId, sets: {} });
-      const setAnno = (sceneAnno.sets[setDef.setId] || { setId: setDef.setId, noInconsistencies: false, pairs: [] });
-
-      const setAnnoRef = useRef(setAnno);
-      useEffect(() => { setAnnoRef.current = setAnno; }, [setAnno]);
-
-      function loadInitialAnnos(studyObj) {
-        const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
+      useEffect(() => {
+        if (!study?.tasks || !raterId) return;
+        const key = ASSIGN_KEY(study.studyId, raterId);
+        const saved = localStorage.getItem(key);
         if (saved) {
-          try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === "object") return parsed; } catch {}
+          try { setAssignedTaskIds(JSON.parse(saved)); }
+          catch { localStorage.removeItem(key); }
+        } else {
+          const want = Math.min(10, study.tasks.length);
+          const ids = assignTasksForRater(study, raterId, want);
+          setAssignedTaskIds(ids);
+          localStorage.setItem(key, JSON.stringify(ids));
         }
-        const blank = {};
-        for (const sc of studyObj.scenes) {
-          const setsMap = {};
-          for (const s of sc.sets) {
-            setsMap[s.setId] = { setId: s.setId, noInconsistencies: false, pairs: [] };
-          }
-          blank[sc.sceneId] = { sceneId: sc.sceneId, sets: setsMap };
-        }
-        return blank;
+        setTaskIndex(0);
+        setActivePairId(null);
+      }, [study, raterId]);
+
+      function loadInitialAnnos(studyObj){
+        const saved = localStorage.getItem(LS_KEY(studyObj.studyId));
+        if (saved) { try { const parsed = JSON.parse(saved); if (parsed && typeof parsed === "object") return parsed; } catch {} }
+        return {};
       }
 
-      function mutateCurrentSet(mutator) {
+      const currentTaskId = assignedTaskIds[taskIndex];
+      const currentTask = useMemo(
+        () => (study.tasks || []).find(t => t.taskId === currentTaskId),
+        [study.tasks, currentTaskId]
+      );
+      const taskAnno = annos[currentTaskId] || { taskId: currentTaskId, noInconsistencies:false, pairs:[] };
+
+      function mutateCurrentTask(mutator){
         setAnnos(prev => {
-          const scId = currentScene.sceneId;
-          const setId = setDef.setId;
-          const scene = prev[scId] || { sceneId: scId, sets: {} };
-          const currSet = scene.sets[setId] || { setId, noInconsistencies: false, pairs: [] };
-          const nextSet = mutator({ ...currSet, pairs: [...(currSet.pairs || [])] });
-          return {
-            ...prev,
-            [scId]: { ...scene, sets: { ...scene.sets, [setId]: nextSet } }
-          };
+          if (!currentTaskId) return prev;
+          const curr = prev[currentTaskId] || { taskId: currentTaskId, noInconsistencies:false, pairs:[] };
+          const next = mutator({ ...curr, pairs: [...(curr.pairs||[])] });
+          return { ...prev, [currentTaskId]: next };
         });
       }
 
       const verifyPairReady = (pid) => {
         if (!pid) return false;
-        const p = (setAnnoRef.current.pairs || []).find(x => x.pairId === pid);
+        const p = (taskAnno.pairs || []).find(x => x.pairId === pid);
         return !!p && (p.rects?.length || 0) < 2;
       };
 
       const createNewPair = () => {
         const id = uid();
-        mutateCurrentSet(set => {
-          const color = COLORS[set.pairs.length % COLORS.length];
-          return { ...set, noInconsistencies: false, pairs: [...set.pairs, { pairId:id, color, label:"", visible:true, rects:[] }] };
+        mutateCurrentTask(set => {
+          const color = COLORS[(set.pairs || []).length % COLORS.length];
+          return { ...set, noInconsistencies: false, pairs: [...(set.pairs||[]), { pairId:id, color, label:"", visible:true, rects:[] }] };
         });
         setActivePairId(id);
       };
 
       const commitRect = (pairId, rect) => {
-        mutateCurrentSet(set => {
-          const pairs = [...set.pairs];
+        mutateCurrentTask(set => {
+          const pairs = [...(set.pairs||[])];
           const idx = pairs.findIndex(p => p.pairId === pairId);
           if (idx < 0) return set;
           const p = pairs[idx];
@@ -721,8 +729,8 @@
       };
 
       const updateRect = (pairId, rectIndex, newRect) => {
-        mutateCurrentSet(set => {
-          const pairs = [...set.pairs];
+        mutateCurrentTask(set => {
+          const pairs = [...(set.pairs||[])];
           const idx = pairs.findIndex(p => p.pairId === pairId);
           if (idx < 0) return set;
           const p = pairs[idx];
@@ -735,105 +743,43 @@
 
       function deletePair(pairId) {
         if (!confirm("Delete this pair?")) return;
-        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.filter(p => p.pairId !== pairId) }));
+        mutateCurrentTask(set => ({ ...set, pairs: (set.pairs||[]).filter(p => p.pairId !== pairId) }));
         if (activePairId === pairId) setActivePairId(null);
       }
       function togglePair(pairId) {
-        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,visible:!p.visible}:p) }));
+        mutateCurrentTask(set => ({ ...set, pairs: (set.pairs||[]).map(p => p.pairId===pairId?{...p,visible:!p.visible}:p) }));
       }
       function labelPair(pairId, label) {
-        mutateCurrentSet(set => ({ ...set, pairs: set.pairs.map(p => p.pairId===pairId?{...p,label}:p) }));
+        mutateCurrentTask(set => ({ ...set, pairs: (set.pairs||[]).map(p => p.pairId===pairId?{...p,label}:p) }));
       }
 
-      function canProceedScene(sceneIndex = sceneIdx) {
-        const sc = study.scenes[sceneIndex];
-        const savedScene = annos[sc.sceneId];
-        if (!savedScene || !savedScene.sets) return false;
-        const s0 = sc.sets[0];
-        const s1 = sc.sets[1];
-        const a0 = savedScene.sets[s0.setId] || { noInconsistencies: false, pairs: [] };
-        const a1 = savedScene.sets[s1.setId] || { noInconsistencies: false, pairs: [] };
-        const ok = (a) => !!a && (a.noInconsistencies === true || (Array.isArray(a.pairs) && a.pairs.some((p) => Array.isArray(p.rects) && p.rects.length === 2)));
-        return ok(a0) && ok(a1);
-      }
-      function allScenesComplete() {
-        if (!study || !Array.isArray(study.scenes)) return false;
-        return study.scenes.every((_, i) => canProceedScene(i));
-      }
-      function gotoNextScene() {
-        if (sceneIdx < study.scenes.length - 1) {
-          setSceneIdx(sceneIdx + 1);
-          setSetTab(0);
-          setActivePairId(null);
-        } else {
-          alert("You've reached the last scene. If everything is complete, press Submit (top-right).");
-        }
-      }
-      function gotoPrevScene() {
-        if (sceneIdx > 0) {
-          setSceneIdx(sceneIdx - 1);
-          setSetTab(0);
-          setActivePairId(null);
-        }
-      }
-
-      // >>> TIMER: start/track elapsed for the currently visible set
-      useEffect(() => {
-        const scId = currentScene.sceneId;
-        const setId = setDef.setId;
-
-        // stamp firstShown once
-        setViewMap(prev => {
-          const s = prev[scId] || {};
-          if (s[setId]) return prev;
-          return {
-            ...prev,
-            [scId]: { ...s, [setId]: { firstShown: Date.now(), elapsed: 0 } }
-          };
-        });
-
-        // tick every second for the visible set
-        const interval = setInterval(() => {
-          setViewMap(prev => {
-            const s = prev[scId] || {};
-            const entry = s[setId];
-            if (!entry) return prev;
-            const elapsed = Math.floor((Date.now() - entry.firstShown) / 1000);
-            // do not clamp to MIN_VIEW_SECS here — keep counting up to avoid "stuck at 30"
-            return { ...prev, [scId]: { ...s, [setId]: { ...entry, elapsed } } };
-          });
-        }, 1000);
-
-        return () => clearInterval(interval);
-      }, [sceneIdx, setTab, currentScene.sceneId, setDef.setId]);
-
-      const getElapsed = (scId, setId) => {
-        const s = viewMap[scId]; if (!s || !s[setId]) return 0;
-        return s[setId].elapsed || 0;
-      };
-      const isSetTimerDone = (scId, setId) => getElapsed(scId, setId) >= MIN_VIEW_SECS;
-
-      // Build per-set countdown for sidebar
-      const setDefsOrdered = [currentScene.sets[order[0]], currentScene.sets[order[1]]];
-      const perSetStatus = setDefsOrdered.map((sd, i) => {
-        const elapsed = getElapsed(currentScene.sceneId, sd.setId);
-        const remain = Math.max(0, MIN_VIEW_SECS - elapsed);
-        return { label: HIDDEN_SET_LABELS[i], done: elapsed >= MIN_VIEW_SECS, remain };
-      });
-      const allTimersDone = perSetStatus.every(s => s.done);
-
-      // Only allow switching sets when the CURRENT set's timer is done
-      const trySwitchSet = (targetIndex) => {
-        if (targetIndex === setTab) return;
-        const thisSetId = setDef.setId;
-        if (!isSetTimerDone(currentScene.sceneId, thisSetId)) {
-          // Optional UX: a subtle nudge instead of alert
-          // alert(`Please view this set for at least ${MIN_VIEW_SECS} seconds before switching.`);
-          return;
-        }
-        setSetTab(targetIndex);
+      function clearAllData() {
+        if (!confirm('This will clear your Prolific ID, assignment, and ALL saved annotations on this device. Continue?')) return;
+        try {
+          localStorage.removeItem('mv3d_rater_id');
+          localStorage.removeItem('mv3d_phase');
+          localStorage.removeItem(LS_KEY(study.studyId));
+          const key = ASSIGN_KEY(study.studyId, raterId || "");
+          localStorage.removeItem(key);
+        } catch {}
+        setRaterId(prolificFromQuery || "");
+        setAnnos(loadInitialAnnos(study));
+        setAssignedTaskIds([]);
+        setTaskIndex(0);
         setActivePairId(null);
-      };
+        setPhase('intro');
+        alert('Cleared. You can start fresh.');
+      }
+
+      const allDone = useMemo(() => {
+        if (!assignedTaskIds.length) return false;
+        return assignedTaskIds.every(id => {
+          const a = annos[id];
+          if (!a) return false;
+          const ok = a.noInconsistencies || (a.pairs||[]).some(p => (p.rects||[]).length === 2);
+          return !!ok;
+        });
+      }, [assignedTaskIds, annos]);
 
       async function submitToServer() {
         try {
@@ -842,22 +788,34 @@
             alert('Please set the Google Apps Script ENDPOINT at the top of the file.');
             return;
           }
-          const fd = new FormData();
-          fd.append('raterId', raterId); // Prolific ID
-          fd.append('studyId', study.studyId);
-          const prolificStudy = getProlificParam("STUDY_ID");
-          const prolificSession = getProlificParam("SESSION_ID");
-          if (prolificStudy) fd.append('prolificStudyId', prolificStudy);
-          if (prolificSession) fd.append('prolificSessionId', prolificSession);
+          const enriched = assignedTaskIds.map(id => {
+            const t = (study.tasks||[]).find(x => x.taskId === id);
+            const a = annos[id] || { taskId:id, noInconsistencies:false, pairs:[] };
+            return {
+              taskId: id,
+              sceneId: t?.sceneId || null,
+              algo: t?.algo || null,
+              sceneTitle: t?.sceneTitle || null,
+              images: t?.images || [],
+              annotation: a
+            };
+          });
 
+          const prolificStudy = getQueryParam("STUDY_ID");
+          const prolificSession = getQueryParam("SESSION_ID");
+
+          const fd = new FormData();
+          fd.append('raterId', raterId);
+          fd.append('studyId', study.studyId);
           fd.append('payload', JSON.stringify({
-            study, annos, exportedAt: new Date().toISOString(),
-            uiOrderByScene: uiOrder, hiddenSetLabels: HIDDEN_SET_LABELS,
+            studyId: study.studyId,
+            minSecondsPerSet: study.minSecondsPerSet ?? 30,
+            assignedTaskIds,
+            results: enriched,
+            exportedAt: new Date().toISOString(),
             prolificPid: raterId,
             prolificStudyId: prolificStudy || null,
-            prolificSessionId: prolificSession || null,
-            // include timers if you want to analyze compliance
-            viewMap
+            prolificSessionId: prolificSession || null
           }));
           await fetch(ENDPOINT, { method: 'POST', mode: 'no-cors', body: fd });
           setPhase('thanks');
@@ -867,40 +825,39 @@
         }
       }
 
-      function clearAllData() {
-        if (!confirm('This will clear your Prolific ID and ALL saved annotations for this study on this device. Continue?')) return;
-        try {
-          localStorage.removeItem('mv3d_rater_id');
-          localStorage.removeItem('mv3d_phase');
-          localStorage.removeItem(LS_KEY(study.studyId));
-          localStorage.removeItem(ORDER_KEY(study.studyId));
-        } catch {}
-        setRaterId(prolificFromQuery || "");
-        setAnnos(loadInitialAnnos(study));
-        setSceneIdx(0);
-        setSetTab(0);
-        setActivePairId(null);
-        setPhase('intro');
-        setUiOrder(buildOrLoadUiOrder(study));
-        setViewMap({});
-        alert('Cleared. You can start fresh.');
-      }
+      const MIN_SECONDS = study.minSecondsPerSet ?? 30;
+      const [remaining, setRemaining] = useState(MIN_SECONDS);
+      useEffect(() => {
+        if (!currentTaskId) return;
+        const key = `mv3d_seenAt__${currentTaskId}`;
+        const now = Date.now();
+        const saved = localStorage.getItem(key);
+        const start = saved ? parseInt(saved,10) : now;
+        if (!saved) localStorage.setItem(key, String(start));
 
-      const progressText = phase === 'rate'
-        ? `${sceneIdx + 1} / ${study.scenes.length} scenes`
-        : (phase === 'thanks' ? `Submitted` : `Instructions`);
+        setRemaining(Math.max(0, MIN_SECONDS - Math.floor((Date.now()-start)/1000)));
+        const id = setInterval(() => {
+          setRemaining(Math.max(0, MIN_SECONDS - Math.floor((Date.now()-start)/1000)));
+        }, 500);
+        return () => clearInterval(id);
+      }, [currentTaskId, MIN_SECONDS]);
 
-      const canSubmit = allScenesComplete();
+      const canTime = remaining === 0;
+      const canLabels = taskAnno.noInconsistencies || (taskAnno.pairs||[]).some(p => (p.rects||[]).length === 2);
+      const canNext = canTime && canLabels;
 
       return (
         <div className="min-h-screen bg-neutral-50 text-neutral-900">
-          {/* Header */}
           <div className="w-full py-3 px-3 lg:px-5 border-b bg-white sticky top-0 z-10">
             <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="text-lg font-semibold">3D Consistency Rater</div>
                 <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">Study: {study.studyId}</div>
-                <div className="text-xs text-neutral-500">{progressText}</div>
+                {phase === 'rate' && (
+                  <div className="text-xs text-neutral-500">
+                    {taskIndex + 1} / {assignedTaskIds.length || 0} sets
+                  </div>
+                )}
                 {configSource && <div className="text-xs text-emerald-700">Loaded: <code>{configSource}</code></div>}
                 {configError && <div className="text-xs text-red-600">Config error: {String(configError)}</div>}
               </div>
@@ -917,8 +874,8 @@
                 <button className="text-sm px-3 py-1.5 rounded-md border" onClick={clearAllData}>Clear all data</button>
                 {phase === 'rate' && (
                   <button
-                    className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !canSubmit || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
-                    disabled={!raterId || !canSubmit || ENDPOINT.includes("PASTE_")}
+                    className={`text-sm px-3 py-1.5 rounded-md border ${(!raterId || !allDone || ENDPOINT.includes("PASTE_")) ? "opacity-50" : "bg-black text-white"}`}
+                    disabled={!raterId || !allDone || ENDPOINT.includes("PASTE_")}
                     onClick={submitToServer}
                   >
                     Submit
@@ -931,7 +888,6 @@
           <div className="max-w-7xl mx-auto p-3 lg:p-5">
             {phase === 'intro' && (
               <IntroScreen
-                study={study}
                 prolificId={raterId}
                 setProlificId={setRaterId}
                 locked={prolificLocked}
@@ -964,76 +920,61 @@
               </div>
             )}
 
-            {phase === 'rate' && (
+            {phase === 'rate' && currentTask && (
               <>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold mr-3">
-                    Scene {sceneIdx + 1}: {study.scenes[sceneIdx].title}
+                    Set {taskIndex + 1} of {assignedTaskIds.length}: {currentTask.sceneTitle}
                   </div>
-                  <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-                    {HIDDEN_SET_LABELS.map((name, i) => (
-                      <button key={i}
-                        className={`px-3 py-1.5 rounded-lg text-sm ${setTab === i ? "bg-white shadow border" : "text-neutral-600"}`}
-                        // >>> TIMER: use gating switcher
-                        onClick={() => trySwitchSet(i)}
-                        title={setTab === i ? "Current" : "Switch set"}
-                      >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Tiny inline countdown for the current set */}
-                  <div className="text-xs text-neutral-600 ml-2">
-                    {(() => {
-                      const sd = setDef;
-                      const elapsed = viewMap[currentScene.sceneId]?.[sd.setId]?.elapsed || 0;
-                      const remain = Math.max(0, MIN_VIEW_SECS - elapsed);
-                      return remain > 0 ? `Time left on this set: ${remain}s` : "Viewing requirement met for this set";
-                    })()}
+                  <div className="text-xs px-2 py-0.5 rounded bg-neutral-100">
+                    Required view time: {study.minSecondsPerSet ?? 30}s
                   </div>
                 </div>
 
                 <div className="flex flex-col lg:flex-row gap-4 items-start">
                   <div className="flex-1 w-full">
                     <SetViewer
-                      setDef={currentScene.sets[order[setTab]]}
-                      anno={setAnno}
+                      setDef={{ images: currentTask.images }}
+                      anno={taskAnno}
                       activePairId={activePairId}
                       verifyPairReady={verifyPairReady}
                       commitRect={commitRect}
                       updateRect={updateRect}
                     />
                   </div>
+
                   <Sidebar
-                    setAnno={setAnno}
-                    onChange={(upd) => mutateCurrentSet(() => upd)}
+                    anno={taskAnno}
+                    onChange={(upd) => mutateCurrentTask(() => upd)}
                     onNewPair={createNewPair}
                     onDeletePair={deletePair}
                     onTogglePair={togglePair}
                     onLabelPair={labelPair}
                     activePairId={activePairId}
                     setActivePairId={setActivePairId}
-                    canFinishScene={(() => {
-                      const sc = study.scenes[sceneIdx];
-                      const saved = annos[sc.sceneId]; if (!saved) return false;
-                      const a = saved.sets[sc.sets[0].setId], b = saved.sets[sc.sets[1].setId];
-                      const ok = (x) => x && (x.noInconsistencies || (x.pairs||[]).some(p => (p.rects||[]).length === 2));
-                      return ok(a) && ok(b);
-                    })()}
-                    onNextScene={() => gotoNextScene()}
-                    onPrevScene={() => gotoPrevScene()}
-                    // >>> TIMER: provide gating data to sidebar button
-                    timeGate={{
-                      perSetStatus: perSetStatus,
-                      allDone: allTimersDone
+                    canNext={canNext}
+                    onPrev={() => {
+                      if (taskIndex > 0) {
+                        setTaskIndex(taskIndex - 1);
+                        setActivePairId(null);
+                      }
                     }}
+                    onNext={() => {
+                      if (taskIndex < assignedTaskIds.length - 1) {
+                        setTaskIndex(taskIndex + 1);
+                        setActivePairId(null);
+                      } else {
+                        alert("This was your last set. You can Submit.");
+                      }
+                    }}
+                    showTimerText={canTime ? "Viewing time met." : `Please examine for ${remaining}s more.`}
                   />
                 </div>
 
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs text-neutral-500">Autosaved locally under <code>{LS_KEY(study.studyId)}</code></div>
                   <div className="text-xs text-neutral-500">
-                    {(canSubmit && allTimersDone) ? "All scenes complete — you can submit." : "Complete all scenes and timers to enable Submit."}
+                    {allDone ? "All assigned sets complete — you can submit." : "Complete all assigned sets to enable Submit."}
                   </div>
                 </div>
               </>
@@ -1043,7 +984,6 @@
       );
     }
 
-    // Mount
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
     </script>

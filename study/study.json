@@ -1,54 +1,53 @@
 {
   "studyId": "mv3d_v1",
-  "instructions": "Mark paired rectangles where multi-view images disagree in 3D.",
-  "setNames": ["DGE", "I-M2M"],
-  "scenes": [
+  "minSecondsPerSet": 30,
+  "tasks": [
     {
+      "taskId": "scene_001__dge_s1",
       "sceneId": "scene_001",
-      "title": "TolkienElf",
-      "sets": [
-        {
-          "setId": "dge_s1",
-          "images": [
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_0.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_1.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_2.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_3.png"
-          ]
-        },
-        {
-          "setId": "im2m_s1",
-          "images": [
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_0_2329_06c060463e6ac13f4bee.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_1_2330_42ddc8281c3eecad5cab.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_2_2331_84316e229c5fe37c03c0.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_3_2332_6f861e1233eff45a811d.png"
-          ]
-        }
+      "sceneTitle": "TolkienElf",
+      "algo": "DGE",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/dge/edit_3.png"
       ]
     },
     {
+      "taskId": "scene_001__im2m_s1",
+      "sceneId": "scene_001",
+      "sceneTitle": "TolkienElf",
+      "algo": "I-M2M",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_0_2329_06c060463e6ac13f4bee.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_1_2330_42ddc8281c3eecad5cab.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_2_2331_84316e229c5fe37c03c0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_01/im2m/final_z0_frame_3_2332_6f861e1233eff45a811d.png"
+      ]
+    },
+    {
+      "taskId": "scene_02__dge_s2",
       "sceneId": "scene_02",
-      "title": "VanGogh",
-      "sets": [
-        {
-          "setId": "dge_s2",
-          "images": [
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_0.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_1.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_2.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_3.png"
-          ]
-        },
-        {
-          "setId": "im2m_s2",
-          "images": [
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_0_2329_2ed057ea89f2bd12f570.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_1_2330_2202bc7831e9007171f5.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_2_2331_8808d07451dcc50c46ca.png",
-            "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_3_2332_a4872a63df73e4285de2.png"
-          ]
-        }
+      "sceneTitle": "VanGogh",
+      "algo": "DGE",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_0.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_1.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_2.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/dge/edit_3.png"
+      ]
+    },
+    {
+      "taskId": "scene_02__im2m_s2",
+      "sceneId": "scene_02",
+      "sceneTitle": "VanGogh",
+      "algo": "I-M2M",
+      "images": [
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_0_2329_2ed057ea89f2bd12f570.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_1_2330_2202bc7831e9007171f5.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_2_2331_8808d07451dcc50c46ca.png",
+        "https://danielgilo.github.io/I-mix2mix-survey/study/scene_02/im2m/final_z0_frame_3_2332_a4872a63df73e4285de2.png"
       ]
     }
   ]
